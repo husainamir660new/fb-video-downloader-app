@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1077534419707",
+    "project_id": "fb-video-downloader-b14ce",
+    "storage_bucket": "fb-video-downloader-b14ce.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1077534419707:android:e79b127d2e91e451265e5e",
+        "android_client_info": {
+          "package_name": "space.manus.fb.video.downloader"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA79RmO8uaodPrbFXJjQdcOBmqi1n1mHOY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
