@@ -8,9 +8,9 @@ import * as Auth from "@/lib/_core/auth";
 /**
  * tRPC React client for type-safe API calls.
  *
- * IMPORTANT (tRPC v11): The `transformer` must be inside `httpBatchLink`,
+ * IMPORTANT (tRPC v11 ): The `transformer` must be inside `httpBatchLink`,
  * NOT at the root createClient level. This ensures client and server
- * use the same serialization format (superjson).
+ * use the same serialization format (superjson ).
  */
 export const trpc = createTRPCReact<AppRouter>();
 
@@ -22,10 +22,10 @@ export function createTRPCClient() {
   return trpc.createClient({
     links: [
       httpBatchLink({
-        url: `${getApiBaseUrl()}/api/trpc`,
+        url: `${getApiBaseUrl( )}/api/trpc`,
         // tRPC v11: transformer MUST be inside httpBatchLink, not at root
         transformer: superjson,
-        async headers() {
+        async headers( ) {
           const token = await Auth.getSessionToken();
           return token ? { Authorization: `Bearer ${token}` } : {};
         },

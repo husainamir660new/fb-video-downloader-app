@@ -51,7 +51,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         "color-success": palette.success,
         "color-warning": palette.warning,
         "color-error": palette.error,
-
       });
     },
     [colorScheme],
@@ -65,7 +64,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     [colorScheme, setColorScheme],
   );
 
-
   return (
     <ThemeContext.Provider value={value}>
       <View style={[{ flex: 1 }, themeVariables]}>{children}</View>
@@ -76,7 +74,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 export function useThemeContext(): ThemeContextValue {
   const ctx = useContext(ThemeContext);
   if (!ctx) {
-    throw new Error("useThemeContext must be used within ThemeProvider");
+    // Return a safe default instead of throwing
+    // This prevents crashes when context is not available
+    return {
+      colorScheme: "light",
+      setColorScheme: () => {},
+    };
   }
   return ctx;
 }

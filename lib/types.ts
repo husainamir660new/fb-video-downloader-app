@@ -7,10 +7,13 @@ export type VideoQuality = "720p" | "480p" | "360p";
 export interface VideoMetadata {
   id: string;
   title: string;
-  duration: number; // in seconds
-  thumbnail: string; // URL
-  url: string; // Facebook video URL
-  fileSize?: Record<VideoQuality, number>; // in bytes
+  duration: number;
+  thumbnail: string;
+  url: string;
+
+  fileSize?: Record<VideoQuality, number>;
+
+  resolution?: Record<VideoQuality, VideoResolution>;
 }
 
 export interface DownloadedVideo {
@@ -46,15 +49,19 @@ export interface UserPreferences {
 }
 
 export interface ReferralData {
+  referralCode?: string;
+  friendsInvited?: number;
+  premiumDaysEarned?: number;
+
   code: string;
   invitesSent: number;
   invitesAccepted: number;
-  rewardsEarned: number; // in premium days
+  rewardsEarned: number;
 }
 
 export interface VideoResolution {
   width: number;
   height: number;
   bitrate: string;
-  fileSize: number;
+  fileSize?: number;
 }

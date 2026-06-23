@@ -1,68 +1,69 @@
 /**
- * Firebase Configuration and Initialization
- * Handles Analytics, Crash Reporting, and Performance Monitoring
- * Firebase is optional - app works without it
+ * Firebase Analytics — Disabled on Native
+ * ---------------------------------------------------------------------------
+ * Firebase SDK is not compatible with React Native / Expo.
+ * This file provides a no-op implementation to prevent crashes.
+ * All analytics methods are safe no-ops on native platforms.
+ * 
+ * CRITICAL FIX: Added Platform.OS check to prevent Firebase initialization
+ * on native Android/iOS. Firebase SDK tries to load native modules that don't
+ * exist in React Native, causing immediate app crash on startup.
  */
-
 import { Platform } from "react-native";
 
-/**
- * Firebase Configuration
- * Replace with your actual Firebase project credentials from Firebase Console
- * Get these from: https://console.firebase.google.com/project/YOUR_PROJECT/settings/general
- */
-export const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "AIzaSyDemoKeyForDevelopment",
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "fb-video-downloader.firebaseapp.com",
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "fb-video-downloader",
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "fb-video-downloader.appspot.com",
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "123456789",
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "1:123456789:web:abcdef123456",
-  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || "G-XXXXXXXXXX",
-};
+// Firebase is only available on web
+const isWeb = Platform.OS === "web";
 
-// Firebase initialization - gracefully handles missing SDK
-let isFirebaseAvailable = false;
-let app: any;
-let analytics: any;
-let performance: any;
+// Stub analytics object
+let analytics: unknown = null;
 
-try {
-  // Try to import Firebase modules
-  const firebase = require("firebase/app");
-  const analyticsModule = require("firebase/analytics");
-  const performanceModule = require("firebase/performance");
-
-  if (firebase && firebase.initializeApp) {
-    app = firebase.initializeApp(firebaseConfig);
-    isFirebaseAvailable = true;
-
-    // Initialize Analytics
-    if (analyticsModule && analyticsModule.getAnalytics) {
-      analytics = analyticsModule.getAnalytics(app);
+// Only try to initialize Firebase on web
+if (isWeb) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const firebase = require("firebase/app");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const analyticsModule = require("firebase/analytics");
+    
+    const apiKey = process.env.EXPO_PUBLIC_FIREBASE_API_KEY;
+    if (apiKey && firebase?.initializeApp) {
+      const firebaseConfig = {
+        apiKey,
+        authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+        projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+        storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+        messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+        appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+        measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
+      };
+      const app = firebase.initializeApp(firebaseConfig);
+      if (analyticsModule?.getAnalytics) {
+        analytics = analyticsModule.getAnalytics(app);
+      }
     }
-
-    // Initialize Performance Monitoring
-    if (performanceModule && performanceModule.getPerformance) {
-      performance = performanceModule.getPerformance(app);
-    }
-
-    console.log("Firebase initialized successfully");
+  } catch (e) {
+    // Firebase SDK not available or initialization failed
+    // All methods will be no-ops
+    console.log("[Firebase] Analytics disabled (not available on this platform)");
   }
-} catch (error) {
-  console.warn("Firebase SDK not available - analytics disabled. This is normal during development.");
-  isFirebaseAvailable = false;
 }
 
-/**
- * Firebase Analytics Service
- * Tracks user events, crashes, and performance metrics
- * Gracefully handles Firebase unavailability
- */
-export class FirebaseAnalyticsService {
-  private static instance: FirebaseAnalyticsService;
+type EventPayload = Record<string, string | number | boolean | undefined>;
 
-  private constructor() {}
+function safeLog(eventName: string, params: EventPayload): void {
+  // No-op on native, only log on web if Firebase is available
+  if (!isWeb || !analytics) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { logEvent } = require("firebase/analytics");
+    logEvent(analytics, eventName, params);
+  } catch {
+    // Swallow analytics errors — they must never break the app.
+  }
+}
+
+export class FirebaseAnalyticsService {
+  private static instance: FirebaseAnalyticsService | null = null;
 
   static getInstance(): FirebaseAnalyticsService {
     if (!FirebaseAnalyticsService.instance) {
@@ -71,51 +72,37 @@ export class FirebaseAnalyticsService {
     return FirebaseAnalyticsService.instance;
   }
 
-  /**
-   * Set user ID for tracking user-specific events
-   */
   setUserId(userId: string): void {
-    if (!isFirebaseAvailable || !analytics) return;
+    if (!isWeb || !analytics) return;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { setUserId } = require("firebase/analytics");
       setUserId(analytics, userId);
-    } catch (error) {
-      console.warn("Error setting user ID:", error);
+    } catch {
+      /* no-op */
     }
   }
 
-  /**
-   * Set user properties for segmentation
-   */
-  setUserProperties(properties: Record<string, string | number | boolean>): void {
-    if (!isFirebaseAvailable || !analytics) return;
+  setUserProperties(
+    properties: Record<string, string | number | boolean>,
+  ): void {
+    if (!isWeb || !analytics) return;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { setUserProperties } = require("firebase/analytics");
       setUserProperties(analytics, properties);
-    } catch (error) {
-      console.warn("Error setting user properties:", error);
+    } catch {
+      /* no-op */
     }
   }
 
-  /**
-   * Track app open event
-   */
   trackAppOpen(): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "app_open", {
-        timestamp: new Date().toISOString(),
-        platform: Platform.OS,
-      });
-    } catch (error) {
-      console.warn("Error tracking app open:", error);
-    }
+    safeLog("app_open", {
+      timestamp: new Date().toISOString(),
+      platform: Platform.OS,
+    });
   }
 
-  /**
-   * Track video download event
-   */
   trackVideoDownload(data: {
     videoId: string;
     quality: string;
@@ -123,228 +110,135 @@ export class FirebaseAnalyticsService {
     duration: number;
     source?: string;
   }): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "video_download", {
-        video_id: data.videoId,
-        quality: data.quality,
-        file_size_mb: Math.round((data.fileSize / 1024 / 1024) * 100) / 100,
-        duration_seconds: data.duration,
-        source: data.source || "unknown",
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking video download:", error);
-    }
+    safeLog("video_download", {
+      video_id: data.videoId,
+      quality: data.quality,
+      file_size_mb: Math.round((data.fileSize / 1024 / 1024) * 100) / 100,
+      duration_seconds: data.duration,
+      source: data.source ?? "unknown",
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track download error
-   */
   trackDownloadError(data: {
     videoId: string;
     quality: string;
     errorMessage: string;
     errorCode?: string;
   }): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "download_error", {
-        video_id: data.videoId,
-        quality: data.quality,
-        error_message: data.errorMessage,
-        error_code: data.errorCode || "unknown",
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking download error:", error);
-    }
+    safeLog("download_error", {
+      video_id: data.videoId,
+      quality: data.quality,
+      error_message: data.errorMessage,
+      error_code: data.errorCode ?? "unknown",
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track premium conversion
-   */
   trackPremiumConversion(data: {
     userId: string;
     plan: "monthly" | "yearly";
     price: number;
     currency: string;
   }): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "premium_purchase", {
-        user_id: data.userId,
-        plan: data.plan,
-        price: data.price,
-        currency: data.currency,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking premium conversion:", error);
-    }
+    safeLog("premium_purchase", {
+      user_id: data.userId,
+      plan: data.plan,
+      price: data.price,
+      currency: data.currency,
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track ad impression
-   */
   trackAdImpression(data: {
     adType: "banner" | "interstitial" | "rewarded";
     adNetwork: string;
     placement: string;
   }): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "ad_impression", {
-        ad_type: data.adType,
-        ad_network: data.adNetwork,
-        placement: data.placement,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking ad impression:", error);
-    }
+    safeLog("ad_impression", {
+      ad_type: data.adType,
+      ad_network: data.adNetwork,
+      placement: data.placement,
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track ad click
-   */
   trackAdClick(data: {
     adType: "banner" | "interstitial" | "rewarded";
     adNetwork: string;
     placement: string;
   }): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "ad_click", {
-        ad_type: data.adType,
-        ad_network: data.adNetwork,
-        placement: data.placement,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking ad click:", error);
-    }
+    safeLog("ad_click", {
+      ad_type: data.adType,
+      ad_network: data.adNetwork,
+      placement: data.placement,
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track rewarded ad completion
-   */
   trackRewardedAdComplete(data: {
     adNetwork: string;
     rewardType: string;
     rewardValue: number;
   }): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "rewarded_ad_complete", {
-        ad_network: data.adNetwork,
-        reward_type: data.rewardType,
-        reward_value: data.rewardValue,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking rewarded ad completion:", error);
-    }
+    safeLog("rewarded_ad_complete", {
+      ad_network: data.adNetwork,
+      reward_type: data.rewardType,
+      reward_value: data.rewardValue,
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track referral share
-   */
   trackReferralShare(data: {
     userId: string;
     referralCode: string;
     shareMethod: string;
   }): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "referral_share", {
-        user_id: data.userId,
-        referral_code: data.referralCode,
-        share_method: data.shareMethod,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking referral share:", error);
-    }
+    safeLog("referral_share", {
+      user_id: data.userId,
+      referral_code: data.referralCode,
+      share_method: data.shareMethod,
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track screen view
-   */
   trackScreenView(screenName: string, screenClass?: string): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "screen_view", {
-        screen_name: screenName,
-        screen_class: screenClass || screenName,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking screen view:", error);
-    }
+    safeLog("screen_view", {
+      screen_name: screenName,
+      screen_class: screenClass ?? screenName,
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track user engagement
-   */
   trackUserEngagement(data: {
     engagementType: string;
     duration: number;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, string | number | boolean>;
   }): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "user_engagement", {
-        engagement_type: data.engagementType,
-        duration_seconds: data.duration,
-        ...data.metadata,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking user engagement:", error);
-    }
+    safeLog("user_engagement", {
+      engagement_type: data.engagementType,
+      duration_seconds: data.duration,
+      ...(data.metadata ?? {}),
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track app crash (manual)
-   */
   trackCrash(error: Error): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, "app_crash", {
-        error_message: error.message,
-        error_stack: error.stack,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.warn("Error tracking crash:", err);
-    }
+    safeLog("app_crash", {
+      error_message: error.message,
+      error_stack: error.stack ?? "",
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  /**
-   * Track custom event
-   */
-  trackCustomEvent(eventName: string, eventData?: Record<string, any>): void {
-    if (!isFirebaseAvailable || !analytics) return;
-    try {
-      const { logEvent } = require("firebase/analytics");
-      logEvent(analytics, eventName, {
-        ...eventData,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn("Error tracking custom event:", error);
-    }
+  trackCustomEvent(
+    eventName: string,
+    eventData?: Record<string, string | number | boolean>,
+  ): void {
+    safeLog(eventName, {
+      ...(eventData ?? {}),
+      timestamp: new Date().toISOString(),
+    });
   }
 }
 

@@ -9,8 +9,6 @@ import { BlurView } from "expo-blur";
 import Animated, {
   FadeIn,
   FadeOut,
-  ScaleIn,
-  ScaleOut,
 } from "react-native-reanimated";
 import { CircularProgressOverlay, MinimalProgressBar } from "./download-progress";
 import { DownloadProgress } from "@/lib/types";
@@ -48,8 +46,8 @@ export function DownloadModal({
       <BlurView intensity={90} className="flex-1">
         <SafeAreaView className="flex-1 items-center justify-center p-4">
           <Animated.View
-            entering={ScaleIn.springify()}
-            exiting={ScaleOut.springify()}
+            entering={FadeIn}
+            exiting={FadeOut}
             className="w-full max-w-sm bg-surface rounded-2xl p-6 gap-4 shadow-lg"
             style={{
               borderColor: colors.border,

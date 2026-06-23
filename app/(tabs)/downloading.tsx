@@ -1,202 +1,230 @@
 /**
- * Downloading Screen
- * Displays download progress with detailed metrics and animations
+ * Downloading Screen - FB Video Downloader
+ * Complete download implementation with progress tracking and error handling
  */
 
-import React, { useState, useEffect } from "react";
-import { ScrollView, View, Text, Alert } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { ScreenContainer } from "@/components/screen-container";
+import React, { useEffect, useState, useCallback } from "react";
 import {
-  DownloadProgressComponent,
-  CircularProgressOverlay,
-} from "@/components/download-progress";
+  ScrollView,
+  Text,
+  View,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+} from "react-native";
+import { useRouter } from "expo-router";
+import { MaterialIcons } from "@expo/vector-icons";
+import { ScreenContainer } from "@/components/screen-container";
+import { useColors } from "@/hooks/use-colors";
 import { useDownload } from "@/lib/download-context";
-import { DownloadService } from "@/lib/download-service";
-import { AnalyticsService } from "@/lib/analytics-service";
-import { DownloadProgress } from "@/lib/types";
+import { useVideoDownload } from "@/hooks/use-video-download";
+import { VideoQuality } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export default function DownloadingScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams();
-  const { isPremium } = useDownload();
-  const [progress, setProgress] = useState<DownloadProgress>({
-    videoId: params.videoId as string,
-    progress: 0,
-    downloadedBytes: 0,
-    totalBytes: 0,
-    speed: 0,
-    eta: 0,
-    status: "downloading",
-  });
-  const [showCircular, setShowCircular] = useState(false);
+  const colors = useColors();
+  const { videoMetadata } = useDownload();
+  const { downloadVideo, extractVideoMetadata, progress, loading, error, success } =
+    useVideoDownload();
 
-  const downloadService = DownloadService.getInstance();
-  const analytics = AnalyticsService.getInstance();
+  const [selectedQuality, setSelectedQuality] = useState<VideoQuality>("480p");
+  const [videoInfo, setVideoInfo] = useState<any>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [downloadStarted, setDownloadStarted] = useState(false);
 
+  // Extract video metadata on mount
   useEffect(() => {
-    // Track screen view
-    analytics.trackScreenView("downloading");
+    if (!videoMetadata?.url) {
+      router.back();
+      return;
+    }
 
-    // Simulate download progress
-    simulateDownload();
-  }, []);
-
-  /**
-   * Simulate download progress (mock implementation)
-   * TODO: Replace with actual download logic
-   */
-  const simulateDownload = async () => {
-    const totalSize = isPremium ? 150 * 1024 * 1024 : 100 * 1024 * 1024; // 150MB for 720p, 100MB for 480p
-    const quality = (params.quality as string) || "480p";
-    let downloadedBytes = 0;
-    const startTime = Date.now();
-
-    // Simulate variable download speed
-    const baseSpeed = isPremium ? 5 * 1024 * 1024 : 3 * 1024 * 1024; // 5MB/s for premium, 3MB/s for free
-    const speedVariation = 0.8 + Math.random() * 0.4; // 0.8x to 1.2x variation
-
-    const interval = setInterval(() => {
-      const elapsedSeconds = (Date.now() - startTime) / 1000;
-      const currentSpeed = baseSpeed * speedVariation;
-
-      downloadedBytes = Math.min(currentSpeed * elapsedSeconds, totalSize);
-      const percentComplete = (downloadedBytes / totalSize) * 100;
-      const remainingBytes = totalSize - downloadedBytes;
-      const eta = remainingBytes / currentSpeed;
-
-      setProgress({
-        videoId: params.videoId as string,
-        progress: percentComplete,
-        downloadedBytes,
-        totalBytes: totalSize,
-        speed: currentSpeed,
-        eta,
-        status: percentComplete >= 100 ? "completed" : "downloading",
-      });
-
-      // Complete download
-      if (percentComplete >= 100) {
-        clearInterval(interval);
-        setProgress((prev) => ({ ...prev, status: "completed", progress: 100 }));
-
-        // Track download completion
-        analytics.trackVideoDownload(
-          params.videoId as string,
-          quality,
-          totalSize
-        );
-
-        // Auto-navigate after 2 seconds
-        setTimeout(() => {
-          router.back();
-        }, 2000);
+    const extract = async () => {
+      setExtracting(true);
+      const info = await extractVideoMetadata(videoMetadata.url);
+      if (info) {
+        setVideoInfo(info);
       }
-    }, 100);
+      setExtracting(false);
+    };
 
-    return () => clearInterval(interval);
-  };
+    extract();
+  }, [videoMetadata?.url, extractVideoMetadata, router]);
 
-  /**
-   * Handle download cancellation
-   */
-  const handleCancel = () => {
-    Alert.alert("Cancel Download", "Are you sure you want to cancel this download?", [
-      { text: "Keep Downloading", style: "cancel" },
-      {
-        text: "Cancel",
-        style: "destructive",
-        onPress: () => {
-          analytics.trackCustomEvent({
-            name: "download_cancelled",
-            parameters: {
-              video_id: params.videoId,
-              progress: progress.progress,
-            },
-          });
-          router.back();
+  // Handle successful download
+  useEffect(() => {
+    if (success && downloadStarted) {
+      Alert.alert("Success", "Video downloaded successfully!", [
+        {
+          text: "OK",
+          onPress: () => {
+            router.back();
+          },
         },
-      },
-    ]);
-  };
+      ]);
+      setDownloadStarted(false);
+    }
+  }, [success, downloadStarted, router]);
+
+  // Handle download error
+  useEffect(() => {
+    if (error && downloadStarted) {
+      Alert.alert("Download Failed", error, [
+        {
+          text: "Try Again",
+          onPress: () => setDownloadStarted(false),
+        },
+        {
+          text: "Cancel",
+          onPress: () => {
+            router.back();
+          },
+        },
+      ]);
+      setDownloadStarted(false);
+    }
+  }, [error, downloadStarted, router]);
+
+  const handleDownload = useCallback(async () => {
+    if (!videoMetadata?.url) {
+      Alert.alert("Error", "No video URL provided");
+      return;
+    }
+
+    setDownloadStarted(true);
+    await downloadVideo(videoMetadata.url, selectedQuality);
+  }, [videoMetadata?.url, selectedQuality, downloadVideo]);
+
+  if (!videoMetadata?.url) {
+    return (
+      <ScreenContainer className="bg-background items-center justify-center">
+        <Text className="text-foreground text-lg">No video selected</Text>
+      </ScreenContainer>
+    );
+  }
 
   return (
-    <ScreenContainer className="p-4">
+    <ScreenContainer className="bg-background">
       <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
-        <View className="flex-1 justify-center gap-6">
+        <View className="flex-1 gap-6 p-6">
           {/* Header */}
           <View className="gap-2">
-            <Text className="text-2xl font-bold text-foreground">Downloading Video</Text>
-            <Text className="text-sm text-muted">
-              {isPremium ? "Premium HD Quality" : "Standard Quality"}
+            <Text className="text-3xl font-bold text-foreground">Download Video</Text>
+            <Text className="text-base text-muted">
+              {videoInfo?.title || "Facebook Video"}
             </Text>
           </View>
 
-          {/* Toggle View Button */}
-          <View className="flex-row gap-2 justify-center">
-            <View
-              className={`px-4 py-2 rounded-lg border ${
-                !showCircular
-                  ? "bg-primary/10 border-primary"
-                  : "bg-surface border-border"
-              }`}
-            >
-              <Text
-                className={`text-sm font-semibold ${
-                  !showCircular ? "text-primary" : "text-muted"
-                }`}
-                onPress={() => setShowCircular(false)}
-              >
-                Details
-              </Text>
+          {/* Video Info */}
+          {extracting ? (
+            <View className="bg-surface rounded-lg p-6 items-center gap-3">
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text className="text-foreground">Extracting video information...</Text>
             </View>
-            <View
-              className={`px-4 py-2 rounded-lg border ${
-                showCircular
-                  ? "bg-primary/10 border-primary"
-                  : "bg-surface border-border"
-              }`}
-            >
-              <Text
-                className={`text-sm font-semibold ${
-                  showCircular ? "text-primary" : "text-muted"
-                }`}
-                onPress={() => setShowCircular(true)}
-              >
-                Circular
+          ) : videoInfo ? (
+            <View className="bg-surface rounded-lg p-4 gap-3 border border-border">
+              <View className="flex-row items-center gap-2">
+                <MaterialIcons name="info" size={20} color={colors.primary} />
+                <Text className="flex-1 text-sm text-foreground font-semibold">
+                  Video Information
+                </Text>
+              </View>
+              <Text className="text-xs text-muted">
+                Duration: {videoInfo.duration ? `${Math.floor(videoInfo.duration / 60)}:${String(videoInfo.duration % 60).padStart(2, "0")}` : "Unknown"}
               </Text>
+              {videoInfo.qualities && videoInfo.qualities.length > 0 && (
+                <Text className="text-xs text-muted">
+                  Available: {videoInfo.qualities.join(", ")}
+                </Text>
+              )}
+            </View>
+          ) : null}
+
+          {/* Quality Selection */}
+          <View className="gap-3">
+            <Text className="text-sm font-semibold text-foreground">Select Quality</Text>
+            <View className="gap-2">
+              {["360p", "480p", "720p"].map((quality) => (
+                <TouchableOpacity
+                  key={quality}
+                  onPress={() => setSelectedQuality(quality as VideoQuality)}
+                  className={cn(
+                    "flex-row items-center gap-3 p-3 rounded-lg border",
+                    selectedQuality === quality
+                      ? "bg-primary/10 border-primary"
+                      : "bg-surface border-border"
+                  )}
+                >
+                  <View
+                    className={cn(
+                      "w-5 h-5 rounded-full border-2",
+                      selectedQuality === quality
+                        ? "bg-primary border-primary"
+                        : "border-muted"
+                    )}
+                  />
+                  <Text
+                    className={cn(
+                      "flex-1 font-semibold",
+                      selectedQuality === quality ? "text-primary" : "text-foreground"
+                    )}
+                  >
+                    {quality}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
-          {/* Progress Display */}
-          {showCircular ? (
-            <CircularProgressOverlay progress={progress} onCancel={handleCancel} />
-          ) : (
-            <DownloadProgressComponent
-              progress={progress}
-              onCancel={handleCancel}
-              showDetails={true}
-            />
-          )}
-
-          {/* Tips Section */}
-          {progress.status === "downloading" && (
-            <View className="bg-surface/50 rounded-lg p-4 border border-border/50 gap-2">
-              <Text className="text-xs font-semibold text-foreground">💡 Tip</Text>
-              <Text className="text-xs text-muted leading-relaxed">
-                Keep the app in the foreground for optimal download speed. You can minimize the
-                app but it may pause the download.
-              </Text>
+          {/* Download Progress */}
+          {downloadStarted && (
+            <View className="bg-surface rounded-lg p-4 gap-3 border border-border">
+              <View className="flex-row items-center gap-2">
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text className="flex-1 text-sm font-semibold text-foreground">
+                  {loading ? "Downloading..." : "Processing..."}
+                </Text>
+              </View>
+              <View className="w-full h-2 bg-border rounded-full overflow-hidden">
+                <View
+                  className="h-full bg-primary"
+                  style={{ width: `${progress}%` }}
+                />
+              </View>
+              <Text className="text-xs text-muted text-center">{progress}%</Text>
             </View>
           )}
 
-          {/* Completion Message */}
-          {progress.status === "completed" && (
-            <View className="bg-success/10 rounded-lg p-4 border border-success/30 gap-2">
-              <Text className="text-sm font-bold text-success">✓ Download Complete!</Text>
-              <Text className="text-xs text-success/80">
-                Your video has been saved to your downloads. Returning to home screen...
+          {/* Download Button */}
+          <TouchableOpacity
+            onPress={handleDownload}
+            disabled={loading || downloadStarted}
+            className={cn(
+              "rounded-lg py-4 items-center",
+              loading || downloadStarted ? "bg-muted" : "bg-primary"
+            )}
+          >
+            <View className="flex-row items-center gap-2">
+              {loading || downloadStarted ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <MaterialIcons name="download" size={20} color="white" />
+              )}
+              <Text className="text-white font-bold text-base">
+                {loading || downloadStarted ? "Downloading..." : "Download Video"}
               </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Error Message */}
+          {error && !downloadStarted && (
+            <View className="bg-error/10 border border-error rounded-lg p-4 gap-2">
+              <View className="flex-row items-center gap-2">
+                <MaterialIcons name="error" size={18} color={colors.error} />
+                <Text className="flex-1 text-xs font-semibold text-error">Error</Text>
+              </View>
+              <Text className="text-xs text-error">{error}</Text>
             </View>
           )}
         </View>

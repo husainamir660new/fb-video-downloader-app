@@ -6,7 +6,6 @@
 import React, { useMemo } from "react";
 import { View, Text, Image, Pressable, ScrollView } from "react-native";
 import { VideoMetadata } from "@/lib/types";
-import { MockVideoService } from "@/lib/mock-video-service";
 import { useColors } from "@/hooks/use-colors";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +14,54 @@ export interface VideoPreviewCardProps {
   selectedQuality?: string;
   onQualitySelect?: (quality: string) => void;
   isPremium?: boolean;
+  isDownloading?: boolean;
   onDownload?: (quality: string) => void;
+}
+
+/**
+ * Get quality label and description
+ */
+function getQualityInfo(quality: string): { label: string; description: string } {
+  const qualityMap: Record<string, { label: string; description: string }> = {
+    "720p": {
+      label: "HD",
+      description: "High Definition - Best for most devices",
+    },
+    "480p": {
+      label: "SD",
+      description: "Standard Definition - Balanced quality & size",
+    },
+    "360p": {
+      label: "Low",
+      description: "Low Quality - Smallest file size",
+    },
+  };
+  return qualityMap[quality] || { label: quality, description: "Unknown quality" };
+}
+
+/**
+ * Format file size to readable string
+ */
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return (bytes / Math.pow(k, i)).toFixed(1) + " " + sizes[i];
+}
+
+/**
+ * Format duration to readable string
+ */
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  }
+  return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
 
 /**
@@ -33,21 +79,13 @@ function QualityBadge({
   onPress: () => void;
 }) {
   const colors = useColors();
-  const mockService = MockVideoService.getInstance();
-  const { label, description } = mockService.getQualityLabel(quality);
+  const { label, description } = getQualityInfo(quality);
 
   // Check if quality is locked (720p for non-premium)
   const isLocked = quality === "720p" && !isPremium;
 
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={isLocked}
-      style={({ pressed }) => [
-        {
-          opacity: pressed ? 0.8 : isLocked ? 0.6 : 1,
-        },
-      ]}
+    <View
       className={cn(
         "flex-1 p-3 rounded-lg border gap-2",
         isSelected
@@ -55,21 +93,31 @@ function QualityBadge({
           : "bg-surface border-border"
       )}
     >
-      <View className="flex-row items-center justify-between">
-        <Text
-          className={cn(
-            "font-semibold text-sm",
-            isSelected ? "text-primary" : "text-foreground"
+      <Pressable
+        onPress={onPress}
+        disabled={isLocked}
+        style={({ pressed }) => [
+          {
+            opacity: pressed ? 0.8 : isLocked ? 0.6 : 1,
+          },
+        ]}
+      >
+        <View className="flex-row items-center justify-between">
+          <Text
+            className={cn(
+              "font-semibold text-sm",
+              isSelected ? "text-primary" : "text-foreground"
+            )}
+          >
+            {label}
+          </Text>
+          {isLocked && (
+            <Text className="text-xs font-bold text-warning">🔒</Text>
           )}
-        >
-          {label}
-        </Text>
-        {isLocked && (
-          <Text className="text-xs font-bold text-warning">🔒</Text>
-        )}
-      </View>
-      <Text className="text-xs text-muted">{description}</Text>
-    </Pressable>
+        </View>
+        <Text className="text-xs text-muted">{description}</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -83,9 +131,7 @@ function ResolutionDetails({
   quality: string;
   video: VideoMetadata;
 }) {
-  const mockService = MockVideoService.getInstance();
   const fileSize = video.fileSize?.[quality as keyof typeof video.fileSize];
-  const resolution = video.resolution?.[quality as keyof typeof video.resolution];
 
   if (!fileSize) return null;
 
@@ -94,25 +140,9 @@ function ResolutionDetails({
       <View className="flex-row justify-between">
         <Text className="text-xs text-muted">File Size:</Text>
         <Text className="text-xs font-semibold text-foreground">
-          {mockService.formatFileSize(fileSize)}
+          {formatFileSize(fileSize)}
         </Text>
       </View>
-      {resolution && (
-        <>
-          <View className="flex-row justify-between">
-            <Text className="text-xs text-muted">Resolution:</Text>
-            <Text className="text-xs font-semibold text-foreground">
-              {resolution.width}×{resolution.height}
-            </Text>
-          </View>
-          <View className="flex-row justify-between">
-            <Text className="text-xs text-muted">Bitrate:</Text>
-            <Text className="text-xs font-semibold text-foreground">
-              {resolution.bitrate}
-            </Text>
-          </View>
-        </>
-      )}
     </View>
   );
 }
@@ -128,14 +158,13 @@ export function VideoPreviewCard({
   onDownload,
 }: VideoPreviewCardProps) {
   const colors = useColors();
-  const mockService = MockVideoService.getInstance();
 
   const videoInfo = useMemo(() => {
     return {
-      duration: mockService.formatDuration(video.duration),
+      duration: formatDuration(video.duration),
       availableQualities: Object.keys(video.fileSize || {}) as string[],
     };
-  }, [video, mockService]);
+  }, [video]);
 
   return (
     <ScrollView
@@ -188,9 +217,8 @@ export function VideoPreviewCard({
               isSelected={selectedQuality === quality}
               isPremium={isPremium}
               onPress={() => {
-                // Check if quality is locked
                 if (quality === "720p" && !isPremium) {
-                  return; // Don't select locked quality
+                  return;
                 }
                 onQualitySelect?.(quality);
               }}
@@ -241,15 +269,16 @@ export function VideoPreviewCard({
 
       {/* Download Button */}
       {onDownload && (
-        <Pressable
-          onPress={() => onDownload(selectedQuality)}
-          className="w-full py-3 rounded-lg bg-primary items-center justify-center"
-          style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}
-        >
-          <Text className="text-white font-bold text-base">
-            Download {selectedQuality}
-          </Text>
-        </Pressable>
+        <View className="w-full py-3 rounded-lg bg-primary items-center justify-center">
+          <Pressable
+            onPress={() => onDownload(selectedQuality)}
+            style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}
+          >
+            <Text className="text-white font-bold text-base">
+              Download {selectedQuality}
+            </Text>
+          </Pressable>
+        </View>
       )}
 
       {/* Info Box */}

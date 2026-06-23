@@ -26,7 +26,7 @@ export async function saveDownloadedVideo(video: DownloadedVideo) {
       JSON.stringify(history)
     );
   } catch (error) {
-    console.error("Error saving downloaded video:", error);
+    // Silently fail - video not saved
   }
 }
 
@@ -35,7 +35,6 @@ export async function getDownloadHistory(): Promise<DownloadedVideo[]> {
     const data = await AsyncStorage.getItem(STORAGE_KEYS.DOWNLOAD_HISTORY);
     return data ? JSON.parse(data) : [];
   } catch (error) {
-    console.error("Error getting download history:", error);
     return [];
   }
 }
@@ -49,7 +48,7 @@ export async function deleteDownloadedVideo(id: string) {
       JSON.stringify(filtered)
     );
   } catch (error) {
-    console.error("Error deleting downloaded video:", error);
+    // Silently fail - video not deleted
   }
 }
 
@@ -57,7 +56,7 @@ export async function clearDownloadHistory() {
   try {
     await AsyncStorage.removeItem(STORAGE_KEYS.DOWNLOAD_HISTORY);
   } catch (error) {
-    console.error("Error clearing download history:", error);
+    // Silently fail - history not cleared
   }
 }
 
@@ -69,7 +68,7 @@ export async function saveUserPreferences(prefs: UserPreferences) {
       JSON.stringify(prefs)
     );
   } catch (error) {
-    console.error("Error saving user preferences:", error);
+    // Silently fail - preferences not saved
   }
 }
 
@@ -88,7 +87,6 @@ export async function getUserPreferences(): Promise<UserPreferences> {
       premiumStatus: "free",
     };
   } catch (error) {
-    console.error("Error getting user preferences:", error);
     return {
       theme: "auto",
       notificationsEnabled: true,
@@ -107,34 +105,41 @@ export async function updateUserPreferences(
     const updated = { ...current, ...updates };
     await saveUserPreferences(updated);
   } catch (error) {
-    console.error("Error updating user preferences:", error);
+    // Silently fail - preferences not updated
   }
 }
 
 // Referral Data
+function hydrateReferralData(
+  raw: Partial<ReferralData>,
+  fallbackCode: string,
+): ReferralData {
+  const code = raw.code ?? raw.referralCode ?? fallbackCode;
+  const invitesSent = raw.invitesSent ?? raw.friendsInvited ?? 0;
+  const invitesAccepted = raw.invitesAccepted ?? 0;
+  const rewardsEarned = raw.rewardsEarned ?? raw.premiumDaysEarned ?? 0;
+  return {
+    code,
+    invitesSent,
+    invitesAccepted,
+    rewardsEarned,
+    referralCode: code,
+    friendsInvited: invitesSent,
+    premiumDaysEarned: rewardsEarned,
+  };
+}
+
 export async function getReferralData(): Promise<ReferralData> {
   try {
     const prefs = await getUserPreferences();
     const data = await AsyncStorage.getItem(STORAGE_KEYS.REFERRAL_DATA);
     if (data) {
-      return JSON.parse(data);
+      return hydrateReferralData(JSON.parse(data), prefs.referralCode);
     }
-    // Return default referral data
-    return {
-      code: prefs.referralCode,
-      invitesSent: 0,
-      invitesAccepted: 0,
-      rewardsEarned: 0,
-    };
+    return hydrateReferralData({}, prefs.referralCode);
   } catch (error) {
-    console.error("Error getting referral data:", error);
     const prefs = await getUserPreferences();
-    return {
-      code: prefs.referralCode,
-      invitesSent: 0,
-      invitesAccepted: 0,
-      rewardsEarned: 0,
-    };
+    return hydrateReferralData({}, prefs.referralCode);
   }
 }
 
@@ -147,7 +152,7 @@ export async function updateReferralData(updates: Partial<ReferralData>) {
       JSON.stringify(updated)
     );
   } catch (error) {
-    console.error("Error updating referral data:", error);
+    // Silently fail - referral data not updated
   }
 }
 
@@ -161,34 +166,91 @@ function generateReferralCode(): string {
   return code;
 }
 
+/**
+ * Advanced Facebook URL validation using comprehensive parser
+ */
 export function validateFacebookUrl(url: string): boolean {
   try {
-    const urlObj = new URL(url);
-    return (
-      urlObj.hostname.includes("facebook.com") ||
-      urlObj.hostname.includes("fb.watch")
-    );
+    // Use the advanced parser from facebook-url-parser
+    const FACEBOOK_URL_PATTERNS = [
+      /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/video\.php\?v=(\d+)/i,
+      /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/watch\/?\?v=(\d+)/i,
+      /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/reel\/(\d+)/i,
+      /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/share\/r\/([a-zA-Z0-9]+)/i,
+      /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/share\/v\/([a-zA-Z0-9]+)/i,
+      /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/(?:[a-zA-Z0-9._-]+)\/videos\/(\d+)/i,
+      /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/(?:[a-zA-Z0-9._-]+)\/posts\/(\d+)/i,
+      /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/permalink\.php\?story_fbid=(\d+)/i,
+      /(?:https?:\/\/ )?m\.(?:facebook|fb)\.com\/video\.php\?v=(\d+)/i,
+      /(?:https?:\/\/ )?m\.(?:facebook|fb)\.com\/watch\/?\?v=(\d+)/i,
+      /(?:https?:\/\/ )?m\.(?:facebook|fb)\.com\/reel\/(\d+)/i,
+      /(?:https?:\/\/ )?m\.(?:facebook|fb)\.com\/share\/r\/([a-zA-Z0-9]+)/i,
+      /(?:https?:\/\/ )?fb\.watch\/([a-zA-Z0-9]+)\/?/i,
+      /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/stories\/(\d+)/i,
+    ];
+
+    const trimmedUrl = url.trim();
+    return FACEBOOK_URL_PATTERNS.some((pattern) => pattern.test(trimmedUrl));
   } catch {
     return false;
   }
 }
 
+/**
+ * Extract video ID from Facebook URL using comprehensive patterns
+ * Supports all modern Facebook URL formats including /share/r/, /reels/, mobile shares, etc.
+ */
 export function extractVideoId(url: string): string | null {
   try {
-    const urlObj = new URL(url);
-    const videoId = urlObj.searchParams.get("v");
-    if (videoId) return videoId;
+    const trimmedUrl = url.trim();
 
-    // Try to extract from path
-    const pathMatch = urlObj.pathname.match(/\/video\.php\?v=(\d+)/);
-    if (pathMatch) return pathMatch[1];
+    // Comprehensive regex patterns for all Facebook URL formats
+    const patterns = [
+      // Standard video.php format
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/video\.php\?v=(\d+)/i, index: 1 },
+      // Watch format
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/watch\/?\?v=(\d+)/i, index: 1 },
+      // Reel format
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/reel\/(\d+)/i, index: 1 },
+      // Share/r format (Mobile shares) - CRITICAL FIX
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/share\/r\/([a-zA-Z0-9_-]+)/i, index: 1 },
+      // Share/v format
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/share\/v\/([a-zA-Z0-9_-]+)/i, index: 1 },
+      // Profile/user video format
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/(?:[a-zA-Z0-9._-]+)\/videos\/(\d+)/i, index: 1 },
+      // Page post format
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/(?:[a-zA-Z0-9._-]+)\/posts\/(\d+)/i, index: 1 },
+      // Permalink format
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/permalink\.php\?story_fbid=(\d+)/i, index: 1 },
+      // Mobile m.facebook.com video.php
+      { regex: /(?:https?:\/\/ )?m\.(?:facebook|fb)\.com\/video\.php\?v=(\d+)/i, index: 1 },
+      // Mobile m.facebook.com watch
+      { regex: /(?:https?:\/\/ )?m\.(?:facebook|fb)\.com\/watch\/?\?v=(\d+)/i, index: 1 },
+      // Mobile m.facebook.com reel
+      { regex: /(?:https?:\/\/ )?m\.(?:facebook|fb)\.com\/reel\/(\d+)/i, index: 1 },
+      // Mobile m.facebook.com share/r - CRITICAL FIX
+      { regex: /(?:https?:\/\/ )?m\.(?:facebook|fb)\.com\/share\/r\/([a-zA-Z0-9_-]+)/i, index: 1 },
+      // Short URL format
+      { regex: /(?:https?:\/\/ )?fb\.watch\/([a-zA-Z0-9_-]+)\/?/i, index: 1 },
+      // Story format
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/stories\/(\d+)/i, index: 1 },
+      // Video with query params
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/video\.php\?v=(\d+)(?:&.*)?/i, index: 1 },
+      // Watch with query params
+      { regex: /(?:https?:\/\/ )?(?:www\.)?(?:facebook|fb)\.com\/watch\/?\?v=(\d+)(?:&.*)?/i, index: 1 },
+    ];
 
-    // Try fb.watch format
-    const fbWatchMatch = urlObj.pathname.match(/\/(\w+)$/);
-    if (fbWatchMatch) return fbWatchMatch[1];
+    // Try each pattern
+    for (const { regex, index } of patterns) {
+      const match = trimmedUrl.match(regex);
+      if (match && match[index]) {
+        return match[index];
+      }
+    }
 
     return null;
-  } catch {
+  } catch (error) {
+    console.error("Error extracting video ID:", error);
     return null;
   }
 }

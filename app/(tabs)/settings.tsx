@@ -16,17 +16,14 @@ import * as Clipboard from "expo-clipboard";
 import { MaterialIcons } from "@expo/vector-icons";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
-import { useColorScheme } from "@/hooks/use-color-scheme";
 import { getUserPreferences, updateUserPreferences, getReferralData } from "@/lib/storage";
 import { UserPreferences, ReferralData } from "@/lib/types";
 
 export default function SettingsScreen() {
   const colors = useColors();
-  const colorScheme = useColorScheme();
 
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [referralData, setReferralData] = useState<ReferralData | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadSettings();
@@ -38,10 +35,8 @@ export default function SettingsScreen() {
       const referral = await getReferralData();
       setPreferences(prefs);
       setReferralData(referral);
-    } catch (err) {
-      console.error("Error loading settings:", err);
-    } finally {
-      setLoading(false);
+    } catch {
+      // Silently fail - settings will use defaults
     }
   };
 
@@ -58,7 +53,7 @@ export default function SettingsScreen() {
       try {
         await Clipboard.setStringAsync(referralData.referralCode);
         Alert.alert("Copied", "Referral code copied to clipboard!");
-      } catch (err) {
+      } catch {
         Alert.alert("Error", "Failed to copy referral code");
       }
     }
@@ -79,127 +74,98 @@ export default function SettingsScreen() {
 
   return (
     <ScreenContainer className="bg-background">
-      <ScrollView
-        contentContainerStyle={{ flexGrow: 1 }}
-        showsVerticalScrollIndicator={false}
-        className="flex-1"
-      >
-        {/* Header */}
-        <View className="mb-6 mt-4">
-          <Text className="text-3xl font-bold text-foreground">Settings</Text>
-          <Text className="text-sm text-muted mt-1">Manage your preferences</Text>
-        </View>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+        <View className="flex-1 gap-6 p-6">
+          {/* Header */}
+          <View className="gap-2">
+            <Text className="text-3xl font-bold text-foreground">Settings</Text>
+            <Text className="text-sm text-muted">Manage your preferences</Text>
+          </View>
 
-        {/* Notifications Section */}
-        <View className="mb-6">
-          <Text className="text-sm font-bold text-foreground mb-3">Notifications</Text>
-          <View className="bg-surface rounded-xl p-4 border border-border flex-row items-center justify-between">
-            <View className="flex-1 flex-row items-center gap-3">
-              <MaterialIcons name="notifications" size={20} color={colors.primary} />
-              <View>
+          {/* Notifications Section */}
+          <View className="gap-3">
+            <Text className="text-sm font-semibold text-foreground uppercase">Notifications</Text>
+            <View className="bg-surface rounded-lg p-4 border border-border flex-row items-center justify-between">
+              <View className="flex-1 gap-1">
                 <Text className="font-semibold text-foreground">Push Notifications</Text>
-                <Text className="text-xs text-muted mt-1">Get download reminders</Text>
+                <Text className="text-xs text-muted">Get notified about downloads</Text>
               </View>
-            </View>
-            {preferences && (
               <Switch
-                value={preferences.notificationsEnabled}
+                value={preferences?.notificationsEnabled ?? true}
                 onValueChange={handleToggleNotifications}
                 trackColor={{ false: colors.border, true: colors.primary }}
               />
-            )}
+            </View>
           </View>
-        </View>
 
-        {/* Referral Section */}
-        {referralData && (
-          <View className="mb-6">
-            <Text className="text-sm font-bold text-foreground mb-3">Referral Program</Text>
-            <View className="bg-primary/10 rounded-xl p-4 border border-primary/20">
-              <View className="flex-row items-center gap-3 mb-4">
-                <MaterialIcons name="card-giftcard" size={24} color={colors.primary} />
-                <View className="flex-1">
-                  <Text className="font-semibold text-foreground">Invite Friends</Text>
-                  <Text className="text-xs text-muted mt-1">
-                    Earn rewards for each friend who joins
+          {/* Referral Section */}
+          {referralData && (
+            <View className="gap-3">
+              <Text className="text-sm font-semibold text-foreground uppercase">Referral</Text>
+              <View className="bg-surface rounded-lg p-4 border border-border gap-3">
+                <View className="gap-1">
+                  <Text className="font-semibold text-foreground">Referral Code</Text>
+                  <Text className="text-xs text-muted">
+                    Share with friends to earn rewards
                   </Text>
                 </View>
-              </View>
-
-              <View className="bg-background rounded-lg p-3 mb-3 flex-row items-center justify-between">
-                <Text className="font-mono font-bold text-primary text-lg">
-                  {referralData.referralCode}
-                </Text>
-                <TouchableOpacity onPress={handleCopyReferralCode} className="p-2">
-                  <MaterialIcons name="content-copy" size={18} color={colors.primary} />
+                <View className="flex-row gap-2">
+                  <View className="flex-1 bg-background rounded-lg p-3 border border-border">
+                    <Text className="font-mono text-sm text-foreground">
+                      {referralData.referralCode}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={handleCopyReferralCode}
+                    className="bg-primary rounded-lg p-3 items-center justify-center"
+                  >
+                    <MaterialIcons name="content-copy" size={20} color="white" />
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity
+                  onPress={handleShareReferralCode}
+                  className="bg-primary/10 rounded-lg p-3 items-center"
+                >
+                  <Text className="font-semibold text-primary">Share Referral Code</Text>
                 </TouchableOpacity>
               </View>
+            </View>
+          )}
 
-              <TouchableOpacity
-                onPress={handleShareReferralCode}
-                className="bg-primary rounded-lg py-3 flex-row items-center justify-center gap-2"
-              >
-                <MaterialIcons name="share" size={18} color={colors.background} />
-                <Text className="font-semibold text-background">Share Code</Text>
-              </TouchableOpacity>
-
-              <View className="mt-4 pt-4 border-t border-primary/20">
-                <View className="flex-row items-center justify-between mb-2">
-                  <Text className="text-sm text-muted">Friends Invited:</Text>
-                  <Text className="font-bold text-foreground">{referralData.friendsInvited}</Text>
-                </View>
-                <View className="flex-row items-center justify-between">
-                  <Text className="text-sm text-muted">Premium Days Earned:</Text>
-                  <Text className="font-bold text-foreground">{referralData.premiumDaysEarned}</Text>
-                </View>
+          {/* About Section */}
+          <View className="gap-3">
+            <Text className="text-sm font-semibold text-foreground uppercase">About</Text>
+            <View className="bg-surface rounded-lg p-4 border border-border gap-3">
+              <View className="flex-row items-center justify-between py-2 border-b border-border">
+                <Text className="text-sm text-muted">App Version</Text>
+                <Text className="font-semibold text-foreground">1.0.0</Text>
+              </View>
+              <View className="flex-row items-center justify-between py-2">
+                <Text className="text-sm text-muted">Build</Text>
+                <Text className="font-semibold text-foreground">1</Text>
               </View>
             </View>
           </View>
-        )}
 
-        {/* About Section */}
-        <View className="mb-6">
-          <Text className="text-sm font-bold text-foreground mb-3">About</Text>
-          <View className="gap-2">
-            <TouchableOpacity className="bg-surface rounded-xl p-4 border border-border flex-row items-center justify-between">
+          {/* Help Section */}
+          <View className="gap-3">
+            <Text className="text-sm font-semibold text-foreground uppercase">Help</Text>
+            <TouchableOpacity className="bg-surface rounded-lg p-4 border border-border flex-row items-center justify-between">
               <View className="flex-row items-center gap-3">
-                <MaterialIcons name="info" size={20} color={colors.primary} />
-                <Text className="font-semibold text-foreground">App Version</Text>
+                <MaterialIcons name="help" size={24} color={colors.primary} />
+                <Text className="font-semibold text-foreground">FAQ</Text>
               </View>
-              <Text className="text-sm text-muted">1.0.0</Text>
+              <MaterialIcons name="chevron-right" size={24} color={colors.muted} />
             </TouchableOpacity>
-
-            <TouchableOpacity className="bg-surface rounded-xl p-4 border border-border flex-row items-center justify-between">
+            <TouchableOpacity className="bg-surface rounded-lg p-4 border border-border flex-row items-center justify-between">
               <View className="flex-row items-center gap-3">
-                <MaterialIcons name="privacy-tip" size={20} color={colors.primary} />
-                <Text className="font-semibold text-foreground">Privacy Policy</Text>
+                <MaterialIcons name="mail" size={24} color={colors.primary} />
+                <Text className="font-semibold text-foreground">Contact Support</Text>
               </View>
-              <MaterialIcons name="chevron-right" size={20} color={colors.muted} />
-            </TouchableOpacity>
-
-            <TouchableOpacity className="bg-surface rounded-xl p-4 border border-border flex-row items-center justify-between">
-              <View className="flex-row items-center gap-3">
-                <MaterialIcons name="description" size={20} color={colors.primary} />
-                <Text className="font-semibold text-foreground">Terms of Service</Text>
-              </View>
-              <MaterialIcons name="chevron-right" size={20} color={colors.muted} />
-            </TouchableOpacity>
-
-            <TouchableOpacity className="bg-surface rounded-xl p-4 border border-border flex-row items-center justify-between">
-              <View className="flex-row items-center gap-3">
-                <MaterialIcons name="bug-report" size={20} color={colors.primary} />
-                <Text className="font-semibold text-foreground">Report a Bug</Text>
-              </View>
-              <MaterialIcons name="chevron-right" size={20} color={colors.muted} />
+              <MaterialIcons name="chevron-right" size={24} color={colors.muted} />
             </TouchableOpacity>
           </View>
         </View>
-
-        {/* Logout Button */}
-        <TouchableOpacity className="bg-error/10 rounded-xl py-4 flex-row items-center justify-center gap-2 mt-4 mb-4">
-          <MaterialIcons name="logout" size={20} color={colors.error} />
-          <Text className="font-semibold text-error">Sign Out</Text>
-        </TouchableOpacity>
       </ScrollView>
     </ScreenContainer>
   );

@@ -9,7 +9,9 @@ import { Platform } from "react-native";
 import "@/lib/_core/nativewind-pressable";
 import { ThemeProvider } from "@/lib/theme-provider";
 import { DownloadProvider } from "@/lib/download-context";
-import { AnalyticsProvider } from "@/lib/analytics-provider";
+import { DownloadHistoryProvider } from "@/lib/download-history-context";
+import { PremiumProvider } from "@/lib/premium-context";
+import { AnalyticsProvider } from "@/lib/analytics-context";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { firebaseAnalytics } from "@/lib/firebase-config";
 import {
@@ -21,7 +23,7 @@ import {
 import type { EdgeInsets, Metrics, Rect } from "react-native-safe-area-context";
 
 import { trpc, createTRPCClient } from "@/lib/trpc";
-import { initManusRuntime, subscribeSafeAreaInsets } from "@/lib/_core/manus-runtime";
+import { subscribeSafeAreaInsets } from "@/lib/_core/manus-runtime";
 
 const DEFAULT_WEB_INSETS: EdgeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 const DEFAULT_WEB_FRAME: Rect = { x: 0, y: 0, width: 0, height: 0 };
@@ -37,10 +39,8 @@ export default function RootLayout() {
   const [insets, setInsets] = useState<EdgeInsets>(initialInsets);
   const [frame, setFrame] = useState<Rect>(initialFrame);
 
-  // Initialize Manus runtime for cookie injection from parent container
+  // Track app open
   useEffect(() => {
-    initManusRuntime();
-    // Track app open
     firebaseAnalytics.trackAppOpen();
   }, []);
 
@@ -54,6 +54,18 @@ export default function RootLayout() {
     const unsubscribe = subscribeSafeAreaInsets(handleSafeAreaUpdate);
     return () => unsubscribe();
   }, [handleSafeAreaUpdate]);
+
+  // Initialize Manus runtime only on web
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    
+    // Dynamic import to avoid ESLint warning
+    import("@/lib/_core/manus-runtime").then((module) => {
+      module.initManusRuntime();
+    }).catch((err) => {
+      console.warn("Failed to initialize Manus runtime:", err);
+    });
+  }, []);
 
   // Create clients once and reuse them
   const [queryClient] = useState(
@@ -90,16 +102,21 @@ export default function RootLayout() {
         <trpc.Provider client={trpcClient} queryClient={queryClient}>
           <QueryClientProvider client={queryClient}>
             <AnalyticsProvider>
-              <DownloadProvider>
+              <PremiumProvider>
+                <DownloadHistoryProvider>
+                  <DownloadProvider>
                 {/* Default to hiding native headers so raw route segments don't appear (e.g. "(tabs)", "products/[id]"). */}
                 {/* If a screen needs the native header, explicitly enable it and set a human title via Stack.Screen options. */}
                 {/* in order for ios apps tab switching to work properly, use presentation: "fullScreenModal" for login page, whenever you decide to use presentation: "modal*/}
                 <Stack screenOptions={{ headerShown: false }}>
                   <Stack.Screen name="(tabs)" />
+                  <Stack.Screen name="modal" options={{ presentation: "modal" }} />
                   <Stack.Screen name="oauth/callback" />
                 </Stack>
                 <StatusBar style="auto" />
-              </DownloadProvider>
+                  </DownloadProvider>
+                </DownloadHistoryProvider>
+              </PremiumProvider>
             </AnalyticsProvider>
           </QueryClientProvider>
         </trpc.Provider>

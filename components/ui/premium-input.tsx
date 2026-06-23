@@ -1,6 +1,11 @@
 /**
  * Premium Input Component
  * Modern text input with icon support and states
+ * 
+ * CRITICAL FIX: Removed undefined NativeWind tokens that cause runtime crashes
+ * - bg-surfaceActive → bg-primary/10
+ * - bg-errorLight → bg-error/10
+ * - Removed unsupported transition-colors class
  */
 
 import React, { useState } from 'react';
@@ -49,9 +54,11 @@ export function PremiumInput({
       <View
         className={cn(
           'flex-row items-center px-4 py-3 rounded-2xl border',
-          'transition-colors duration-200',
-          focused ? 'bg-surfaceActive border-primary' : 'bg-surface border-border',
-          error && 'border-error bg-errorLight',
+          // FIXED: Use valid theme tokens only
+          // - focused state: bg-primary/10 (instead of bg-surfaceActive)
+          // - error state: bg-error/10 (instead of bg-errorLight)
+          focused ? 'bg-primary/10 border-primary' : 'bg-surface border-border',
+          error && 'border-error bg-error/10',
           disabled && 'opacity-50',
           className
         )}
@@ -67,7 +74,7 @@ export function PremiumInput({
           editable={!disabled}
           multiline={multiline}
           numberOfLines={numberOfLines}
-          placeholderTextColor={colors.foregroundTertiary}
+          placeholderTextColor={colors.muted}
           className={cn(
             'flex-1 text-base font-medium',
             'text-foreground',

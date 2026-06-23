@@ -28,8 +28,7 @@ export interface VideoFormat {
 export class RealVideoExtractionService {
   private static instance: RealVideoExtractionService;
   private mockService = MockVideoService.getInstance();
-  private apiBaseUrl = "https://api.allorigins.win/raw?url=";
-  private ytDlpApiUrl = "https://yt-dlp-api.herokuapp.com/api/info";
+  private backendApiUrl = process.env.EXPO_PUBLIC_BACKEND_API_URL || "";
 
   private constructor() {}
 
@@ -51,251 +50,177 @@ export class RealVideoExtractionService {
         return {
           success: false,
           error: "Invalid Facebook URL format",
-          source: "mock",
+          source: "real",
         };
       }
 
-      // Try real extraction first
-      const realResult = await this.tryRealExtraction(url);
-      if (realResult.success) {
-        return realResult;
-      }
-
-      // Fallback to mock service
-      console.log("Real extraction failed, using mock service");
-      const mockResult = await this.tryMockExtraction(url);
-      return mockResult;
-    } catch (error) {
-      console.error("Video extraction error:", error);
-      // Fallback to mock service on any error
-      return this.tryMockExtraction(url);
-    }
-  }
-
-  /**
-   * Try real video extraction using yt-dlp API
-   */
-  private async tryRealExtraction(url: string): Promise<ExtractionResult> {
-    try {
-      // Extract video ID from URL
-      const videoId = this.extractVideoId(url);
-      if (!videoId) {
-        throw new Error("Could not extract video ID");
-      }
-
-      // Attempt yt-dlp API call
-      const response = await fetch(this.ytDlpApiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Parse response and extract metadata
-      const metadata = this.parseYtDlpResponse(data, videoId, url);
-
-      return {
-        success: true,
-        data: metadata,
-        source: "real",
-      };
-    } catch (error) {
-      console.error("Real extraction failed:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-        source: "real",
-      };
-    }
-  }
-
-  /**
-   * Fallback to mock extraction
-   */
-  private async tryMockExtraction(url: string): Promise<ExtractionResult> {
-    try {
+      // Extract video ID
       const videoId = this.extractVideoId(url);
       if (!videoId) {
         return {
           success: false,
-          error: "Could not extract video ID",
-          source: "mock",
+          error: "Could not extract video ID from URL",
+          source: "real",
         };
       }
 
-      const metadata = await this.mockService.extractVideoMetadata(videoId);
+      // Try real API first
+      if (this.backendApiUrl) {
+        try {
+          const response = await fetch(`${this.backendApiUrl}/api/trpc/facebookDownloader.extractVideo`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              url,
+              videoId,
+            }),
+          });
 
-      if (metadata) {
+          if (response.ok) {
+            const data = await response.json();
+            return {
+              success: true,
+              data: data.result?.data,
+              source: "real",
+            };
+          }
+        } catch (error) {
+          console.warn("Real API failed, falling back to mock service", error);
+        }
+      }
+
+      // Fallback to mock service
+      const mockData = await this.mockService.extractVideoMetadata(videoId);
+      if (mockData && mockData !== null) {
         return {
           success: true,
-          data: metadata,
+          data: mockData,
           source: "mock",
         };
       }
 
       return {
         success: false,
-        error: "Video not found",
+        error: "Could not extract video metadata",
         source: "mock",
       };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-        source: "mock",
+        error: errorMessage,
+        source: "real",
       };
     }
   }
 
   /**
-   * Parse yt-dlp API response
+   * Get available video qualities for a given resolution
    */
-  private parseYtDlpResponse(
-    data: any,
-    videoId: string,
-    url: string
-  ): VideoMetadata {
-    const formats = data.formats || [];
-    const info = data.info || {};
-
-    // Extract file sizes for different qualities
-    const fileSizes: Record<VideoQuality, number> = {
-      "720p": 125 * 1024 * 1024, // 125 MB default
-      "480p": 65 * 1024 * 1024, // 65 MB default
-      "360p": 30 * 1024 * 1024, // 30 MB default
+  getQualityInfo(resolution: string): { label: string; description: string } {
+    const labels: Record<string, { label: string; description: string }> = {
+      "1080p": {
+        label: "Full HD",
+        description: "Full High Definition - Best quality",
+      },
+      "720p": {
+        label: "HD",
+        description: "High Definition - Best for most devices",
+      },
+      "480p": {
+        label: "SD",
+        description: "Standard Definition - Balanced quality & size",
+      },
+      "360p": {
+        label: "Low",
+        description: "Low Quality - Smallest file size",
+      },
     };
-
-    // Try to extract actual file sizes from formats
-    formats.forEach((format: VideoFormat) => {
-      if (format.filesize) {
-        if (format.resolution?.includes("720")) {
-          fileSizes["720p"] = format.filesize;
-        } else if (format.resolution?.includes("480")) {
-          fileSizes["480p"] = format.filesize;
-        } else if (format.resolution?.includes("360")) {
-          fileSizes["360p"] = format.filesize;
-        }
-      }
-    });
-
-    return {
-      id: videoId,
-      title: data.title || info.title || "Facebook Video",
-      duration: data.duration || info.duration || 0,
-      thumbnail:
-        data.thumbnail ||
-        info.thumbnail ||
-        "https://via.placeholder.com/400x300?text=Video+Thumbnail",
-      url,
-      fileSize: fileSizes,
-    };
+    return labels[resolution] || { label: resolution, description: "Unknown quality" };
   }
 
   /**
-   * Validate Facebook URL format
+   * Validate if URL is a Facebook video URL
    */
   private isValidFacebookUrl(url: string): boolean {
     const facebookUrlPatterns = [
       /facebook\.com\/watch/,
       /facebook\.com\/.*\/videos/,
+      /facebook\.com\/share\/r\//,
+      /facebook\.com\/share\/v\//,
+      /facebook\.com\/share\/[a-zA-Z0-9_\-]+/,
+      /facebook\.com\/reel\/[a-zA-Z0-9_\-]+/,
       /fb\.watch/,
       /m\.facebook\.com\/watch/,
+      /m\.facebook\.com\/share/,
     ];
-
     return facebookUrlPatterns.some((pattern) => pattern.test(url));
   }
 
   /**
    * Extract video ID from Facebook URL
+   * Supports multiple URL formats
    */
   private extractVideoId(url: string): string | null {
-    try {
-      // Pattern: facebook.com/watch/?v=VIDEO_ID
-      const watchMatch = url.match(/[?&]v=(\d+)/);
-      if (watchMatch) {
-        return watchMatch[1];
-      }
-
-      // Pattern: facebook.com/USERNAME/videos/VIDEO_ID
-      const videoMatch = url.match(/\/videos\/(\d+)/);
-      if (videoMatch) {
-        return videoMatch[1];
-      }
-
-      // Pattern: fb.watch/VIDEO_ID
-      const fbWatchMatch = url.match(/fb\.watch\/(\w+)/);
-      if (fbWatchMatch) {
-        return fbWatchMatch[1];
-      }
-
-      // Generate ID from URL hash if no ID found
-      return `video_${Date.now()}`;
-    } catch (error) {
-      console.error("Error extracting video ID:", error);
-      return null;
+    // watch?v=ID format
+    const watchMatch = url.match(/[?&]v=([0-9]+)/);
+    if (watchMatch?.[1]) {
+      return watchMatch[1];
     }
+
+    // /videos/ID format
+    const videosMatch = url.match(/\/videos\/([0-9]+)/);
+    if (videosMatch?.[1]) {
+      return videosMatch[1];
+    }
+
+    // fb.watch/ID format
+    const fbWatchMatch = url.match(/fb\.watch\/([a-zA-Z0-9_\-]+)/);
+    if (fbWatchMatch?.[1]) {
+      return fbWatchMatch[1];
+    }
+
+    // /reel/ID format
+    const reelMatch = url.match(/\/reel\/([a-zA-Z0-9_\-]+)/);
+    if (reelMatch?.[1]) {
+      return reelMatch[1];
+    }
+
+    // /share/r/ID format
+    const shareRMatch = url.match(/\/share\/r\/([a-zA-Z0-9_\-]+)\/?$/);
+    if (shareRMatch?.[1]) {
+      return shareRMatch[1];
+    }
+
+    // /share/v/ID format
+    const shareVMatch = url.match(/\/share\/v\/([a-zA-Z0-9_\-]+)\/?$/);
+    if (shareVMatch?.[1]) {
+      return shareVMatch[1];
+    }
+
+    // Direct share link: /share/ID format (most flexible)
+    const directShareMatch = url.match(/\/share\/([a-zA-Z0-9_\-]+)\/?$/);
+    if (directShareMatch?.[1]) {
+      return directShareMatch[1];
+    }
+
+    return null;
   }
 
   /**
-   * Get available quality options for a video
+   * Get mock video by ID (for testing)
    */
-  getAvailableQualities(metadata: VideoMetadata): VideoQuality[] {
-    if (!metadata.fileSize) {
-      return ["720p", "480p", "360p"];
-    }
-
-    return (Object.keys(metadata.fileSize) as VideoQuality[]).filter(
-      (quality) => metadata.fileSize![quality] > 0
-    );
+  getMockVideoById(videoId: string): VideoMetadata | undefined {
+    return this.mockService.getMockVideoById(videoId);
   }
 
   /**
-   * Get file size for specific quality
+   * Get all mock videos (for testing)
    */
-  getFileSizeForQuality(
-    metadata: VideoMetadata,
-    quality: VideoQuality
-  ): number {
-    if (!metadata.fileSize) {
-      return 0;
-    }
-    return metadata.fileSize[quality] || 0;
-  }
-
-  /**
-   * Format file size to human readable format
-   */
-  formatFileSize(bytes: number): string {
-    if (bytes === 0) return "0 B";
-
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  }
-
-  /**
-   * Format duration to readable string
-   */
-  formatDuration(seconds: number): string {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, "0")}:${secs
-        .toString()
-        .padStart(2, "0")}`;
-    }
-    return `${minutes}:${secs.toString().padStart(2, "0")}`;
+  getAllMockVideos(): Record<string, VideoMetadata> {
+    return this.mockService.getAllMockVideos();
   }
 }
 

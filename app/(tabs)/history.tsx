@@ -1,9 +1,9 @@
 /**
  * History Screen - Download History
- * Clean, production-ready implementation
+ * Displays all downloaded videos with persistence and management
  */
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback } from "react";
 import {
   ScrollView,
   Text,
@@ -11,50 +11,47 @@ import {
   TouchableOpacity,
   FlatList,
   Alert,
+  Image,
 } from "react-native";
 import { useFocusEffect } from "expo-router";
-import { MaterialIcons } from "@expo/vector-icons";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
-import { getDownloadHistory, deleteDownloadedVideo, clearDownloadHistory } from "@/lib/storage";
-import { DownloadedVideo } from "@/lib/types";
+import { useDownloadHistory } from "@/lib/download-history-context";
+import * as FileSystem from "expo-file-system/legacy";
 
 export default function HistoryScreen() {
   const colors = useColors();
-  const [downloads, setDownloads] = useState<DownloadedVideo[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { downloads, removeDownload, clearHistory, loadHistory } = useDownloadHistory();
 
   useFocusEffect(
     useCallback(() => {
-      loadDownloads();
-    }, [])
+      loadHistory();
+    }, [loadHistory])
   );
 
-  const loadDownloads = async () => {
-    try {
-      setLoading(true);
-      const history = await getDownloadHistory();
-      setDownloads(history);
-    } catch (err) {
-      console.error("Error loading downloads:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteDownload = (video: DownloadedVideo) => {
+  const handleDeleteDownload = (id: string, title: string) => {
     Alert.alert(
       "Delete Download",
-      `Are you sure you want to delete "${video.title}"?`,
+      `Are you sure you want to delete "${title}"?`,
       [
         { text: "Cancel", onPress: () => {} },
         {
           text: "Delete",
           onPress: async () => {
             try {
-              await deleteDownloadedVideo(video.id);
-              setDownloads(downloads.filter((d) => d.id !== video.id));
-            } catch (err) {
+              const download = downloads.find((d) => d.id === id);
+              if (download) {
+                // Delete file from device
+                try {
+                  await FileSystem.deleteAsync(download.fileUri);
+                } catch (error) {
+                  console.warn("Failed to delete file:", error);
+                }
+                // Remove from history
+                await removeDownload(id);
+              }
+            } catch (error) {
               Alert.alert("Error", "Failed to delete download");
             }
           },
@@ -74,9 +71,17 @@ export default function HistoryScreen() {
           text: "Clear All",
           onPress: async () => {
             try {
-              await clearDownloadHistory();
-              setDownloads([]);
-            } catch (err) {
+              // Delete all files
+              for (const download of downloads) {
+                try {
+                  await FileSystem.deleteAsync(download.fileUri);
+                } catch (error) {
+                  console.warn("Failed to delete file:", error);
+                }
+              }
+              // Clear history
+              await clearHistory();
+            } catch (error) {
               Alert.alert("Error", "Failed to clear history");
             }
           },
@@ -86,80 +91,115 @@ export default function HistoryScreen() {
     );
   };
 
-  const renderDownloadItem = ({ item }: { item: DownloadedVideo }) => (
-    <View className="bg-surface rounded-xl p-4 mb-3 border border-border flex-row items-center gap-3">
-      <View className="bg-primary/10 rounded-lg p-3">
-        <MaterialIcons name="video-library" size={24} color={colors.primary} />
-      </View>
-      <View className="flex-1">
-        <Text className="text-sm font-semibold text-foreground" numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text className="text-xs text-muted mt-1">
-          {new Date(item.downloadedAt).toLocaleDateString()}
-        </Text>
-        <Text className="text-xs text-muted">
-          {(item.fileSize / (1024 * 1024)).toFixed(2)} MB
-        </Text>
-      </View>
-      <TouchableOpacity
-        onPress={() => handleDeleteDownload(item)}
-        className="p-2"
-      >
-        <MaterialIcons name="delete" size={20} color={colors.error} />
-      </TouchableOpacity>
-    </View>
-  );
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { 
+      hour: "2-digit", 
+      minute: "2-digit" 
+    });
+  };
+
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return "Size unknown";
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+  };
 
   return (
     <ScreenContainer className="bg-background">
-      <ScrollView
-        contentContainerStyle={{ flexGrow: 1 }}
-        showsVerticalScrollIndicator={false}
-        className="flex-1"
-      >
-        {/* Header */}
-        <View className="mb-6 mt-4">
-          <Text className="text-3xl font-bold text-foreground">Download History</Text>
-          <Text className="text-sm text-muted mt-1">
-            {downloads.length} video{downloads.length !== 1 ? "s" : ""} downloaded
-          </Text>
-        </View>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+        <View className="flex-1 gap-4 p-6">
+          {/* Header */}
+          <View className="flex-row items-center justify-between mb-2">
+            <View className="gap-1">
+              <Text className="text-3xl font-bold text-foreground">History</Text>
+              <Text className="text-sm text-muted">
+                {downloads.length} download{downloads.length !== 1 ? "s" : ""}
+              </Text>
+            </View>
+            {downloads.length > 0 && (
+              <TouchableOpacity
+                onPress={handleClearAll}
+                className="p-2 rounded-lg bg-error/10"
+              >
+                <MaterialIcons name="delete-sweep" size={24} color={colors.error} />
+              </TouchableOpacity>
+            )}
+          </View>
 
-        {/* Downloads List */}
-        {downloads.length > 0 ? (
-          <>
+          {/* Downloads List */}
+          {downloads.length > 0 ? (
             <FlatList
               data={downloads}
-              renderItem={renderDownloadItem}
               keyExtractor={(item) => item.id}
               scrollEnabled={false}
-              className="mb-4"
-            />
+              renderItem={({ item }) => (
+                <View className="bg-surface rounded-lg p-4 mb-3 border border-border overflow-hidden">
+                  <View className="flex-row gap-3">
+                    {/* Thumbnail */}
+                    {item.thumbnail ? (
+                      <Image
+                        source={{ uri: item.thumbnail }}
+                        className="w-16 h-16 rounded-lg bg-muted"
+                      />
+                    ) : (
+                      <View className="w-16 h-16 rounded-lg bg-muted items-center justify-center">
+                        <MaterialIcons 
+                          name="video-library" 
+                          size={24} 
+                          color={colors.primary} 
+                        />
+                      </View>
+                    )}
 
-            {/* Clear All Button */}
-            <TouchableOpacity
-              onPress={handleClearAll}
-              className="py-3 rounded-xl bg-error/10 flex-row items-center justify-center gap-2 mt-4"
-            >
-              <MaterialIcons name="delete-sweep" size={20} color={colors.error} />
-              <Text className="font-semibold text-error">Clear All History</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          /* Empty State */
-          <View className="flex-1 items-center justify-center py-12">
-            <View className="bg-primary/10 rounded-full p-6 mb-4">
-              <MaterialIcons name="history" size={48} color={colors.primary} />
+                    {/* Info */}
+                    <View className="flex-1 gap-1">
+                      <Text 
+                        className="text-sm font-semibold text-foreground" 
+                        numberOfLines={2}
+                      >
+                        {item.title}
+                      </Text>
+                      <Text className="text-xs text-muted">
+                        {item.author || "Unknown author"}
+                      </Text>
+                      <View className="flex-row gap-2 mt-1">
+                        <View className="bg-primary/20 rounded px-2 py-1">
+                          <Text className="text-xs font-semibold text-primary">
+                            {item.quality}
+                          </Text>
+                        </View>
+                        <Text className="text-xs text-muted">
+                          {formatFileSize(item.fileSize)}
+                        </Text>
+                      </View>
+                      <Text className="text-xs text-muted mt-1">
+                        {formatDate(item.downloadedAt)}
+                      </Text>
+                    </View>
+
+                    {/* Delete Button */}
+                    <TouchableOpacity
+                      onPress={() => handleDeleteDownload(item.id, item.title)}
+                      className="p-2 rounded-lg bg-error/10"
+                    >
+                      <MaterialIcons name="delete" size={20} color={colors.error} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            />
+          ) : (
+            <View className="flex-1 items-center justify-center gap-3">
+              <MaterialIcons name="history" size={48} color={colors.muted} />
+              <Text className="text-lg font-semibold text-foreground">No Downloads Yet</Text>
+              <Text className="text-sm text-muted text-center">
+                Download Facebook videos from the Home tab to see them here
+              </Text>
             </View>
-            <Text className="text-lg font-semibold text-foreground text-center">
-              No Downloads Yet
-            </Text>
-            <Text className="text-sm text-muted text-center mt-2">
-              Your download history will appear here
-            </Text>
-          </View>
-        )}
+          )}
+        </View>
       </ScrollView>
     </ScreenContainer>
   );

@@ -36,12 +36,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
     // Store error info
     this.setState({
-      errorInfo: errorInfo.componentStack,
+      errorInfo: (errorInfo.componentStack ?? null) as string | null,
     });
 
-    // Log to console for development
-    console.error("Error Boundary caught an error:", error);
-    console.error("Error Info:", errorInfo);
+    // Log to console for development only
+    if (__DEV__) {
+      console.error("Error Boundary caught an error:", error);
+      console.error("Error Info:", errorInfo);
+    }
   }
 
   handleReset = () => {

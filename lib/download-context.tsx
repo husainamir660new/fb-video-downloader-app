@@ -220,7 +220,7 @@ export function DownloadProvider({
 
       setPremiumStatus(isPremium, prefs.premiumExpiresAt);
     } catch (error) {
-      console.error("Error loading premium status:", error);
+      // Silently fail - premium status will default to false
     }
   }, [setPremiumStatus]);
 
@@ -251,7 +251,24 @@ export function DownloadProvider({
 export function useDownload() {
   const context = useContext(DownloadContext);
   if (context === undefined) {
-    throw new Error("useDownload must be used within DownloadProvider");
+    // Return a safe default object instead of throwing
+    // This prevents crashes in edge cases during initialization
+    return {
+      currentDownload: null,
+      videoMetadata: null,
+      selectedQuality: "480p" as const,
+      isPremium: false,
+      premiumExpiresAt: null,
+      setVideoMetadata: () => {},
+      setSelectedQuality: () => {},
+      startDownload: () => {},
+      updateProgress: () => {},
+      completeDownload: () => {},
+      failDownload: () => {},
+      clearDownload: () => {},
+      setPremiumStatus: () => {},
+      loadPremiumStatus: async () => {},
+    };
   }
   return context;
 }

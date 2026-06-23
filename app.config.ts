@@ -1,63 +1,78 @@
-// Load environment variables with proper priority (system > .env)
 import "./scripts/load-env.js";
 import type { ExpoConfig } from "expo/config";
 
-// Bundle ID format: space.manus.<project_name_dots>.<timestamp>
-// e.g., "my-app" created at 2024-01-15 10:30:45 -> "space.manus.my.app.t20240115103045"
-// Bundle ID can only contain letters, numbers, and dots
-// Android requires each dot-separated segment to start with a letter
+// ---------------------------------------------------------------------------
+// Bundle / Package identifiers
+// ---------------------------------------------------------------------------
+// Reverse-DNS style identifier. Letters, digits and dots only; each
+// dot-separated segment must start with a letter on Android.
 const rawBundleId = "space.manus.fb_video_downloader.t20260503055614";
 const bundleId =
   rawBundleId
-    .replace(/[-_]/g, ".") // Replace hyphens/underscores with dots
-    .replace(/[^a-zA-Z0-9.]/g, "") // Remove invalid chars
-    .replace(/\.+/g, ".") // Collapse consecutive dots
-    .replace(/^\.+|\.+$/g, "") // Trim leading/trailing dots
+    .replace(/[-_]/g, ".")
+    .replace(/[^a-zA-Z0-9.]/g, "")
+    .replace(/\.+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
     .toLowerCase()
     .split(".")
-    .map((segment) => {
-      // Android requires each segment to start with a letter
-      // Prefix with 'x' if segment starts with a digit
-      return /^[a-zA-Z]/.test(segment) ? segment : "x" + segment;
-    })
+    .map((segment) => (/^[a-zA-Z]/.test(segment) ? segment : "x" + segment))
     .join(".") || "space.manus.app";
-    
-// Extract timestamp from bundle ID and prefix with "manus" for deep link scheme
-// e.g., "space.manus.my.app.t20240115103045" -> "manus20240115103045"
-const timestamp = bundleId.split(".").pop()?.replace(/^t/, "") ?? "";
-const schemeFromBundleId = `manus${timestamp}`; // 👈 این خط اصلاح شد
 
+const timestamp = bundleId.split(".").pop()?.replace(/^t/, "") ?? "";
+const schemeFromBundleId = `manus${timestamp}`;
+
+// ---------------------------------------------------------------------------
+// Branding & Google Play Compliance
+// ---------------------------------------------------------------------------
 const env = {
-  // App branding - update these values directly (do not use env vars)
   appName: "FB Video Downloader",
   appSlug: "fb_video_downloader",
-  // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
-  // Leave empty to use the default icon from assets/images/icon.png
-  logoUrl: "https://d2xsxph8kpxj0f.cloudfront.net/310519663536195383/FgNVMB3VxiUe2gdY2a9c7N/icon-6c7uwqESghcy4g2d7qJkbv.png",
+  logoUrl:
+    "https://d2xsxph8kpxj0f.cloudfront.net/310519663536195383/FgNVMB3VxiUe2gdY2a9c7N/icon-6c7uwqESghcy4g2d7qJkbv.png",
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
   androidPackage: bundleId,
+  // Google Play Store compliance (required for submission )
+  privacyPolicyUrl: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || "https://fbvideodl-fgnvmb3v.manus.space/privacy-policy",
+  termsOfServiceUrl: process.env.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || "https://fbvideodl-fgnvmb3v.manus.space/terms-of-service",
+  supportEmail: process.env.EXPO_PUBLIC_SUPPORT_EMAIL || "support@fbvideodl.app",
 };
 
+// ---------------------------------------------------------------------------
+// Expo configuration
+// ---------------------------------------------------------------------------
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
   version: "1.0.0",
-  versionCode: 1,
+  extra: {
+    eas: {
+      projectId: "e07aa9ad-8898-4d93-b9ca-884ad7f4ab82",
+    },
+    // Google Play Store metadata
+    privacyPolicyUrl: env.privacyPolicyUrl,
+    termsOfServiceUrl: env.termsOfServiceUrl,
+    supportEmail: env.supportEmail,
+  },
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme: env.scheme,
   userInterfaceStyle: "automatic",
   newArchEnabled: true,
+
   ios: {
     supportsTablet: true,
     bundleIdentifier: env.iosBundleId,
-    "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+    infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
+      NSPhotoLibraryUsageDescription:
+        "Allow $(PRODUCT_NAME ) to save downloaded videos to your photo library.",
+      NSPhotoLibraryAddUsageDescription:
+        "Allow $(PRODUCT_NAME) to save downloaded videos to your photo library.",
+    },
   },
+
   android: {
-    googleServicesFile: "./google-services.json", // 👈 این خط برای اتصال فایربیس به اکسپو اضافه شد
     adaptiveIcon: {
       backgroundColor: "#E6F4FE",
       foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -67,14 +82,12 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    minSdkVersion: 24,
-    targetSdkVersion: 34,
     permissions: [
-      "INTERNET",
-      "READ_EXTERNAL_STORAGE",
-      "WRITE_EXTERNAL_STORAGE",
-      "ACCESS_NETWORK_STATE",
-      "POST_NOTIFICATIONS",
+      "android.permission.INTERNET",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "android.permission.READ_MEDIA_IMAGES",
+      "android.permission.READ_MEDIA_VIDEO",
     ],
     intentFilters: [
       {
@@ -90,11 +103,13 @@ const config: ExpoConfig = {
       },
     ],
   },
+
   web: {
     bundler: "metro",
     output: "static",
     favicon: "./assets/images/favicon.png",
   },
+
   plugins: [
     "expo-router",
     [
@@ -128,10 +143,15 @@ const config: ExpoConfig = {
         android: {
           buildArchs: ["armeabi-v7a", "arm64-v8a"],
           minSdkVersion: 24,
+          compileSdkVersion: 35,
+          targetSdkVersion: 35,
+          buildToolsVersion: "35.0.0",
+          kotlinVersion: "2.0.21",
         },
       },
     ],
   ],
+
   experiments: {
     typedRoutes: true,
     reactCompiler: true,
