@@ -96,7 +96,8 @@ export async function transcribeAudio(
     }
 
     // Step 2: Download audio from URL
-    let audioBuffer: Buffer;
+    // ✅ FIXED: Changed from Buffer to Uint8Array
+    let audioBuffer: Uint8Array;
     let mimeType: string;
     try {
       const response = await fetch(options.audioUrl);
@@ -108,7 +109,8 @@ export async function transcribeAudio(
         };
       }
 
-      audioBuffer = Buffer.from(await response.arrayBuffer());
+      // ✅ FIXED: Use Uint8Array instead of Buffer.from()
+      audioBuffer = new Uint8Array(await response.arrayBuffer());
       mimeType = response.headers.get("content-type") || "audio/mpeg";
 
       // Check file size (16MB limit)

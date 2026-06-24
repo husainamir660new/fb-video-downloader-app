@@ -13,7 +13,7 @@
  *       url: "https://example.com/original.jpg",
  *       mimeType: "image/jpeg"
  *     }]
- *   });
+ *   } );
  */
 import { storagePut } from "../storage";
 import { ENV } from "./env";
@@ -71,10 +71,15 @@ export async function generateImage(options: GenerateImageOptions): Promise<Gene
     };
   };
   const base64Data = result.image.b64Json;
-  const buffer = Buffer.from(base64Data, "base64");
+  // ✅ FIXED: Convert base64 to Uint8Array (Buffer is not available in all environments)
+  const binaryString = atob(base64Data);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
 
   // Save to S3
-  const { url } = await storagePut(`generated/${Date.now()}.png`, buffer, result.image.mimeType);
+  const { url } = await storagePut(`generated/${Date.now()}.png`, bytes, result.image.mimeType);
   return {
     url,
   };
