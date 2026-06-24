@@ -26,24 +26,25 @@ interface FacebookVideoMetadata {
 
 /**
  * Extract video ID from Facebook URL
+ * Supports all Facebook URL formats with improved regex patterns
  */
 function extractVideoIdFromUrl(url: string): string | null {
   try {
     const patterns = [
-      // facebook.com/watch?v=VIDEO_ID
-      /(?:facebook\.com|fb\.com)\/(?:watch\/\?v=|video\.php\?v=)([a-zA-Z0-9_-]+)/,
-      // facebook.com/watch/VIDEO_ID
-      /(?:facebook\.com|fb\.com)\/(?:watch|video)\/([a-zA-Z0-9_-]+)/,
+      // facebook.com/watch?v=VIDEO_ID or m.facebook.com/watch?v=VIDEO_ID
+      /[?&]v=([a-zA-Z0-9_-]+)/,
+      // facebook.com/USERNAME/videos/VIDEO_ID
+      /\/videos\/([a-zA-Z0-9_-]+)/,
+      // facebook.com/share/r/VIDEO_ID (short share link)
+      /\/share\/r\/([a-zA-Z0-9_-]+)/,
       // facebook.com/share/v/VIDEO_ID
-      /(?:facebook\.com|fb\.com)\/share\/v\/([a-zA-Z0-9_-]+)/,
-      // facebook.com/share/r/VIDEO_ID ← اضافه شد
-      /(?:facebook\.com|fb\.com)\/share\/r\/([a-zA-Z0-9_-]+)/,
-      // facebook.com/share/VIDEO_ID
-      /(?:facebook\.com|fb\.com)\/share\/([a-zA-Z0-9_-]+)/,
+      /\/share\/v\/([a-zA-Z0-9_-]+)/,
+      // facebook.com/share/VIDEO_ID (direct share)
+      /\/share\/([a-zA-Z0-9_-]+)(?:\/|\?|$)/,
+      // facebook.com/reel/VIDEO_ID
+      /\/reel\/([a-zA-Z0-9_-]+)/,
       // fb.watch/VIDEO_ID
-      /(?:fb\.watch)\/([a-zA-Z0-9_-]+)/,
-      // reel/VIDEO_ID
-      /(?:facebook\.com|fb\.com)\/reel\/([a-zA-Z0-9_-]+)/,
+      /fb\.watch\/([a-zA-Z0-9_-]+)/,
       // Generic: v/VIDEO_ID
       /\/v\/([a-zA-Z0-9_-]+)/,
       // Generic: video.php?v=VIDEO_ID
@@ -144,7 +145,8 @@ function isValidFacebookUrl(url: string): boolean {
     const urlObj = new URL(url);
     return (
       urlObj.hostname.includes("facebook.com") ||
-      urlObj.hostname.includes("fb.com")
+      urlObj.hostname.includes("fb.com") ||
+      urlObj.hostname.includes("m.facebook.com")
     );
   } catch {
     return false;
