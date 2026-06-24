@@ -28,7 +28,10 @@ export interface VideoFormat {
 export class RealVideoExtractionService {
   private static instance: RealVideoExtractionService;
   private mockService = MockVideoService.getInstance();
-  private backendApiUrl = process.env.EXPO_PUBLIC_BACKEND_API_URL || "";
+  private backendApiUrl = process.env.EXPO_PUBLIC_BACKEND_API_URL || 
+    "https://fb-video-downloader-app-backend.onrender.com";
+  // ✅ درست: اگر env var نبود، Render URL استفاده می‌شود
+
 
   private constructor() {}
 
