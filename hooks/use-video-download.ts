@@ -80,7 +80,12 @@ async function downloadFileWithProgress(
     });
 
     // Write file to device
-    const base64 = Buffer.from(response.data).toString("base64");
+    // ✅ FIXED: Convert ArrayBuffer to base64 without Buffer
+    const binaryString = String.fromCharCode.apply(
+      null,
+      Array.from(new Uint8Array(response.data))
+    );
+    const base64 = btoa(binaryString);
     await FileSystem.writeAsStringAsync(fileUri, base64, {
       encoding: FileSystem.EncodingType.Base64,
     });

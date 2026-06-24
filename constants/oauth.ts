@@ -29,7 +29,7 @@ export const API_BASE_URL = env.apiBaseUrl;
  * Metro runs on 8081, API server runs on 3000.
  * URL pattern: https://PORT-sandboxid.region.domain
  */
-export function getApiBaseUrl(): string {
+export function getApiBaseUrl( ): string {
   // If API_BASE_URL is set, use it
   if (API_BASE_URL) {
     return API_BASE_URL.replace(/\/$/, "");
@@ -56,11 +56,18 @@ const encodeState = (value: string) => {
   if (typeof globalThis.btoa === "function") {
     return globalThis.btoa(value);
   }
-  const BufferImpl = (globalThis as Record<string, any>).Buffer;
-  if (BufferImpl) {
-    return BufferImpl.from(value, "utf-8").toString("base64");
+  // FIXED: Use TextEncoder + btoa instead of Buffer (not available in all environments)
+  try {
+    const encoder = new TextEncoder();
+    const uint8Array = encoder.encode(value);
+    let binaryString = "";
+    for (let i = 0; i < uint8Array.length; i++) {
+      binaryString += String.fromCharCode(uint8Array[i]);
+    }
+    return btoa(binaryString);
+  } catch {
+    return value;
   }
-  return value;
 };
 
 /**
