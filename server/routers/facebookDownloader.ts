@@ -66,28 +66,28 @@ function extractVideoIdFromUrl(url: string): string | null {
 
 /**
  * Call RapidAPI to extract video metadata
+ * ✅ FIXED: Using correct endpoint and host
  */
 async function extractVideoFromRapidAPI(
   url: string
 ): Promise<FacebookVideoMetadata | null> {
   try {
     const apiKey = process.env.EXPO_PUBLIC_RAPIDAPI_KEY;
-    const apiHost = process.env.EXPO_PUBLIC_RAPIDAPI_HOST;
 
-    if (!apiKey || !apiHost) {
+    if (!apiKey) {
       throw new Error("RapidAPI credentials not configured");
     }
 
-    // Call RapidAPI endpoint
+    // ✅ FIXED: Correct endpoint and host
     const response = await axios.get(
-      "https://facebook-video-downloader-api.p.rapidapi.com/info",
+      "https://facebook-video-downloader9.p.rapidapi.com/api/v1/videos/download",
       {
         params: {
           url: url,
         },
         headers: {
           "x-rapidapi-key": apiKey,
-          "x-rapidapi-host": apiHost,
+          "x-rapidapi-host": "facebook-video-downloader9.p.rapidapi.com",
         },
         timeout: 15000,
       }
@@ -95,37 +95,47 @@ async function extractVideoFromRapidAPI(
 
     const data = response.data;
 
+    // ✅ FIXED: Parse new response format
+    if (data.status !== "success" || !data.data) {
+      throw new Error("Invalid response from RapidAPI");
+    }
+
+    const videoData = data.data;
+    const videoInfo = videoData.video || {};
+    const downloadData = videoData.download || {};
+
     // Parse response and extract metadata
     const metadata: FacebookVideoMetadata = {
-      id: extractVideoIdFromUrl(url) || "unknown",
-      title: data.title || "Facebook Video",
-      description: data.description || undefined,
-      duration: data.duration || 0,
-      thumbnail: data.thumbnail || undefined,
+      id: videoInfo.id || extractVideoIdFromUrl(url) || "unknown",
+      title: videoInfo.title || "Facebook Video",
+      description: videoInfo.description || undefined,
+      duration: videoInfo.duration_ms || 0,
+      thumbnail: videoInfo.thumbnail_url || undefined,
       qualities: [],
-      author: data.author || undefined,
-      uploadDate: data.uploadDate || undefined,
+      author: videoInfo.author || undefined,
+      uploadDate: videoInfo.uploadDate || undefined,
     };
 
-    // Extract quality options
-    if (data.links && typeof data.links === "object") {
-      Object.entries(data.links).forEach(([quality, url]: [string, any]) => {
-        if (typeof url === "string") {
-          metadata.qualities.push({
-            quality: quality,
-            url: url,
-            size: undefined,
-          });
-        }
+    // ✅ FIXED: Extract quality options from new format
+    if (downloadData.sd && downloadData.sd.url) {
+      metadata.qualities.push({
+        quality: downloadData.sd.quality || "SD",
+        url: downloadData.sd.url,
+        size: undefined,
+      });
+    }
+
+    if (downloadData.hd && downloadData.hd.url) {
+      metadata.qualities.push({
+        quality: downloadData.hd.quality || "HD",
+        url: downloadData.hd.url,
+        size: undefined,
       });
     }
 
     // Ensure we have at least some quality
     if (metadata.qualities.length === 0) {
-      metadata.qualities.push({
-        quality: "480p",
-        url: data.url || "",
-      });
+      throw new Error("No download URLs available");
     }
 
     return metadata;
@@ -203,7 +213,7 @@ export const facebookDownloaderRouter = router({
     .input(
       z.object({
         url: z.string().url("Invalid URL format"),
-        quality: z.enum(["360p", "480p", "720p", "1080p"]),
+        quality: z.enum(["SD", "HD", "360p", "480p", "720p", "1080p"]),
       })
     )
     .mutation(async ({ input }) => {
