@@ -30,11 +30,24 @@ interface FacebookVideoMetadata {
 function extractVideoIdFromUrl(url: string): string | null {
   try {
     const patterns = [
-      /(?:facebook\.com|fb\.com)\/(?:watch\/\?v=|video\.php\?v=)(\d+)/,
-      /(?:facebook\.com|fb\.com)\/(?:watch|video)\/(\d+)/,
-      /(?:facebook\.com|fb\.com)\/share\/v\/(\d+)/,
-      /v\/(\d+)/,
-      /video\.php\?v=(\d+)/,
+      // facebook.com/watch?v=VIDEO_ID
+      /(?:facebook\.com|fb\.com)\/(?:watch\/\?v=|video\.php\?v=)([a-zA-Z0-9_-]+)/,
+      // facebook.com/watch/VIDEO_ID
+      /(?:facebook\.com|fb\.com)\/(?:watch|video)\/([a-zA-Z0-9_-]+)/,
+      // facebook.com/share/v/VIDEO_ID
+      /(?:facebook\.com|fb\.com)\/share\/v\/([a-zA-Z0-9_-]+)/,
+      // facebook.com/share/r/VIDEO_ID ← اضافه شد
+      /(?:facebook\.com|fb\.com)\/share\/r\/([a-zA-Z0-9_-]+)/,
+      // facebook.com/share/VIDEO_ID
+      /(?:facebook\.com|fb\.com)\/share\/([a-zA-Z0-9_-]+)/,
+      // fb.watch/VIDEO_ID
+      /(?:fb\.watch)\/([a-zA-Z0-9_-]+)/,
+      // reel/VIDEO_ID
+      /(?:facebook\.com|fb\.com)\/reel\/([a-zA-Z0-9_-]+)/,
+      // Generic: v/VIDEO_ID
+      /\/v\/([a-zA-Z0-9_-]+)/,
+      // Generic: video.php?v=VIDEO_ID
+      /video\.php\?v=([a-zA-Z0-9_-]+)/,
     ];
 
     for (const pattern of patterns) {
