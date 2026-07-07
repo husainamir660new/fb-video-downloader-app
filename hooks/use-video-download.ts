@@ -11,6 +11,7 @@ import { Platform } from "react-native";
 import { VideoMetadata, VideoQuality } from "@/lib/types";
 import axios from "axios";
 import { trpc } from "@/lib/trpc";
+import { extractFacebookVideoId } from "@/lib/facebook-url-parser";
 
 interface DownloadState {
   loading: boolean;
@@ -27,35 +28,6 @@ interface VideoExtractionResult {
   qualities: VideoQuality[];
   downloadUrl?: string;
   author?: string;
-}
-
-/**
- * Simple Facebook video URL parser
- * Extracts video ID from various Facebook URL formats
- */
-function extractVideoIdFromUrl(url: string): string | null {
-  try {
-    // Handle various Facebook URL formats
-    const patterns = [
-      /(?:facebook\.com|fb\.com)\/(?:watch\/\?v=|video\.php\?v=)(\d+)/,
-      /(?:facebook\.com|fb\.com)\/(?:watch|video)\/(\d+)/,
-      /(?:facebook\.com|fb\.com)\/share\/v\/(\d+)/,
-      /(?:facebook\.com|fb\.com)\/share\/r\/([a-zA-Z0-9]+)/,
-      /v\/(\d+)/,
-      /video\.php\?v=(\d+)/,
-    ];
-
-    for (const pattern of patterns) {
-      const match = url.match(pattern);
-      if (match && match[1]) {
-        return match[1];
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -80,11 +52,14 @@ async function downloadFileWithProgress(
     });
 
     // Write file to device
-    // ✅ FIXED: Convert ArrayBuffer to base64 without Buffer
-    const binaryString = String.fromCharCode.apply(
-      null,
-      Array.from(new Uint8Array(response.data))
-    );
+    // ✅ FIXED: Convert ArrayBuffer to base64 without Buffer (avoid stack overflow for large files)
+    const uint8Array = new Uint8Array(response.data);
+    let binaryString = "";
+    const chunkSize = 8192; // Process in chunks to avoid stack overflow
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.subarray(i, i + chunkSize);
+      binaryString += String.fromCharCode.apply(null, Array.from(chunk));
+    }
     const base64 = btoa(binaryString);
     await FileSystem.writeAsStringAsync(fileUri, base64, {
       encoding: FileSystem.EncodingType.Base64,
@@ -110,6 +85,7 @@ export function useVideoDownload() {
 
   /**
    * Extract video metadata from Facebook URL using Backend API
+   * ✅ FIXED: useCallback ensures stable function reference
    */
   const extractVideoMetadata = useCallback(
     async (url: string): Promise<VideoExtractionResult | null> => {
@@ -121,10 +97,10 @@ export function useVideoDownload() {
           throw new Error("Invalid Facebook URL");
         }
 
-        // Extract video ID
-        const videoId = extractVideoIdFromUrl(url);
+        // Extract video ID using advanced parser
+        const videoId = extractFacebookVideoId(url);
         if (!videoId) {
-          throw new Error("Could not extract video ID from URL");
+          throw new Error("Could not extract video ID from URL. Please check the Facebook video link.");
         }
 
         // Call Backend API to extract metadata using RapidAPI
@@ -162,11 +138,12 @@ export function useVideoDownload() {
         return null;
       }
     },
-    [facebookDownloaderMutation]
+    [facebookDownloaderMutation]  // ✅ Stable dependency
   );
 
   /**
    * Download video file to device storage
+   * ✅ FIXED: useCallback ensures stable function reference
    */
   const downloadVideo = useCallback(
     async (
@@ -272,7 +249,7 @@ export function useVideoDownload() {
         return false;
       }
     },
-    [getDownloadUrlMutation]
+    [getDownloadUrlMutation]  // ✅ Stable dependency
   );
 
   /**
@@ -289,8 +266,8 @@ export function useVideoDownload() {
 
   return {
     ...state,
-    extractVideoMetadata,
-    downloadVideo,
+    extractVideoMetadata,  // ✅ Stable reference from useCallback
+    downloadVideo,         // ✅ Stable reference from useCallback
     reset,
   };
 }

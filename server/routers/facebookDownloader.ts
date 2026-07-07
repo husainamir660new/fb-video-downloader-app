@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
 import axios from "axios";
+import { extractFacebookVideoId } from "../../lib/facebook-url-parser";
 
 /**
  * Facebook Video Downloader Router
@@ -25,69 +26,29 @@ interface FacebookVideoMetadata {
 }
 
 /**
- * Extract video ID from Facebook URL
- * Supports all Facebook URL formats with improved regex patterns
- */
-function extractVideoIdFromUrl(url: string): string | null {
-  try {
-    const patterns = [
-      // facebook.com/watch?v=VIDEO_ID or m.facebook.com/watch?v=VIDEO_ID
-      /[?&]v=([a-zA-Z0-9_-]+)/,
-      // facebook.com/USERNAME/videos/VIDEO_ID
-      /\/videos\/([a-zA-Z0-9_-]+)/,
-      // facebook.com/share/r/VIDEO_ID (short share link)
-      /\/share\/r\/([a-zA-Z0-9_-]+)/,
-      // facebook.com/share/v/VIDEO_ID
-      /\/share\/v\/([a-zA-Z0-9_-]+)/,
-      // facebook.com/share/VIDEO_ID (direct share)
-      /\/share\/([a-zA-Z0-9_-]+)(?:\/|\?|$)/,
-      // facebook.com/reel/VIDEO_ID
-      /\/reel\/([a-zA-Z0-9_-]+)/,
-      // fb.watch/VIDEO_ID
-      /fb\.watch\/([a-zA-Z0-9_-]+)/,
-      // Generic: v/VIDEO_ID
-      /\/v\/([a-zA-Z0-9_-]+)/,
-      // Generic: video.php?v=VIDEO_ID
-      /video\.php\?v=([a-zA-Z0-9_-]+)/,
-    ];
-
-    for (const pattern of patterns) {
-      const match = url.match(pattern);
-      if (match && match[1]) {
-        return match[1];
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Call RapidAPI to extract video metadata
- * ✅ FIXED: Using correct endpoint and host
  */
 async function extractVideoFromRapidAPI(
   url: string
 ): Promise<FacebookVideoMetadata | null> {
   try {
     const apiKey = process.env.EXPO_PUBLIC_RAPIDAPI_KEY;
+    const apiHost = process.env.EXPO_PUBLIC_RAPIDAPI_HOST;
 
-    if (!apiKey) {
+    if (!apiKey || !apiHost) {
       throw new Error("RapidAPI credentials not configured");
     }
 
-    // ✅ FIXED: Correct endpoint and host
+    // Call RapidAPI endpoint
     const response = await axios.get(
-      "https://facebook-video-downloader9.p.rapidapi.com/api/v1/videos/download",
+      "https://facebook-video-downloader-api.p.rapidapi.com/info",
       {
         params: {
           url: url,
         },
         headers: {
           "x-rapidapi-key": apiKey,
-          "x-rapidapi-host": "facebook-video-downloader9.p.rapidapi.com",
+          "x-rapidapi-host": apiHost,
         },
         timeout: 15000,
       }
@@ -95,47 +56,37 @@ async function extractVideoFromRapidAPI(
 
     const data = response.data;
 
-    // ✅ FIXED: Parse new response format
-    if (data.status !== "success" || !data.data) {
-      throw new Error("Invalid response from RapidAPI");
-    }
-
-    const videoData = data.data;
-    const videoInfo = videoData.video || {};
-    const downloadData = videoData.download || {};
-
     // Parse response and extract metadata
     const metadata: FacebookVideoMetadata = {
-      id: videoInfo.id || extractVideoIdFromUrl(url) || "unknown",
-      title: videoInfo.title || "Facebook Video",
-      description: videoInfo.description || undefined,
-      duration: videoInfo.duration_ms || 0,
-      thumbnail: videoInfo.thumbnail_url || undefined,
+      id: extractFacebookVideoId(url) || "unknown",
+      title: data.title || "Facebook Video",
+      description: data.description || undefined,
+      duration: data.duration || 0,
+      thumbnail: data.thumbnail || undefined,
       qualities: [],
-      author: videoInfo.author || undefined,
-      uploadDate: videoInfo.uploadDate || undefined,
+      author: data.author || undefined,
+      uploadDate: data.uploadDate || undefined,
     };
 
-    // ✅ FIXED: Extract quality options from new format
-    if (downloadData.sd && downloadData.sd.url) {
-      metadata.qualities.push({
-        quality: downloadData.sd.quality || "SD",
-        url: downloadData.sd.url,
-        size: undefined,
-      });
-    }
-
-    if (downloadData.hd && downloadData.hd.url) {
-      metadata.qualities.push({
-        quality: downloadData.hd.quality || "HD",
-        url: downloadData.hd.url,
-        size: undefined,
+    // Extract quality options
+    if (data.links && typeof data.links === "object") {
+      Object.entries(data.links).forEach(([quality, url]: [string, any]) => {
+        if (typeof url === "string") {
+          metadata.qualities.push({
+            quality: quality,
+            url: url,
+            size: undefined,
+          });
+        }
       });
     }
 
     // Ensure we have at least some quality
     if (metadata.qualities.length === 0) {
-      throw new Error("No download URLs available");
+      metadata.qualities.push({
+        quality: "480p",
+        url: data.url || "",
+      });
     }
 
     return metadata;
@@ -155,8 +106,7 @@ function isValidFacebookUrl(url: string): boolean {
     const urlObj = new URL(url);
     return (
       urlObj.hostname.includes("facebook.com") ||
-      urlObj.hostname.includes("fb.com") ||
-      urlObj.hostname.includes("m.facebook.com")
+      urlObj.hostname.includes("fb.com")
     );
   } catch {
     return false;
@@ -180,8 +130,8 @@ export const facebookDownloaderRouter = router({
           throw new Error("Invalid Facebook URL");
         }
 
-        // Extract video ID
-        const videoId = extractVideoIdFromUrl(input.url);
+        // Extract video ID using advanced parser
+        const videoId = extractFacebookVideoId(input.url);
         if (!videoId) {
           throw new Error("Could not extract video ID from URL");
         }
@@ -213,7 +163,7 @@ export const facebookDownloaderRouter = router({
     .input(
       z.object({
         url: z.string().url("Invalid URL format"),
-        quality: z.enum(["SD", "HD", "360p", "480p", "720p", "1080p"]),
+        quality: z.enum(["360p", "480p", "720p", "1080p"]),
       })
     )
     .mutation(async ({ input }) => {
@@ -277,7 +227,7 @@ export const facebookDownloaderRouter = router({
     .query(({ input }) => {
       try {
         const isValid = isValidFacebookUrl(input.url);
-        const videoId = isValid ? extractVideoIdFromUrl(input.url) : null;
+        const videoId = isValid ? extractFacebookVideoId(input.url) : null;
 
         return {
           isValid,

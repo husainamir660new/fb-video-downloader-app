@@ -181,9 +181,14 @@ export class RealVideoDownloadService {
 
       // Write file to disk using base64 encoding
       // Convert arraybuffer to base64 without using Buffer (not available in React Native)
-      // Use Uint8Array and String.fromCharCode for cross-platform compatibility
+      // Process in chunks to avoid stack overflow for large files
       const uint8Array = new Uint8Array(response.data);
-      const binaryString = String.fromCharCode.apply(null, Array.from(uint8Array));
+      let binaryString = "";
+      const chunkSize = 8192;
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.subarray(i, i + chunkSize);
+        binaryString += String.fromCharCode.apply(null, Array.from(chunk));
+      }
       const base64Data = btoa(binaryString);
       await FileSystem.writeAsStringAsync(filepath, base64Data, {
         encoding: "base64",
