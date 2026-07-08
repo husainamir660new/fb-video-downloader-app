@@ -27,7 +27,7 @@ const schemeFromBundleId = `manus${timestamp}`;
 // ---------------------------------------------------------------------------
 const env = {
   appName: "Fast Video Downloader",
-  appSlug: "fast-video-downloader",
+  appSlug: "fb-video-downloader",
   logoUrl:
     "https://d2xsxph8kpxj0f.cloudfront.net/310519663536195383/FgNVMB3VxiUe2gdY2a9c7N/icon-azsQsYx7dAZdEb6DbyQND9.webp",
   scheme: schemeFromBundleId,

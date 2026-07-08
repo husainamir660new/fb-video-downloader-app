@@ -121,7 +121,7 @@ export function useVideoDownload() {
           duration: data.duration,
           thumbnail: data.thumbnail,
           qualities: data.qualities.map((q: any) => q.quality as VideoQuality),
-          author: data.author,
+           author: undefined, // New API doesn't provide author
         };
 
         setState((prev) => ({ ...prev, loading: false }));
