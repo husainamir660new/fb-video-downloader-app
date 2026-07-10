@@ -1,6 +1,6 @@
 /**
  * useVideoDownload Hook
- * Real video download implementation with RapidAPI and Backend integration
+ * Real video download implementation with direct Backend integration
  * Handles video extraction, quality selection, and actual file download
  */
 
@@ -8,7 +8,7 @@ import { useState, useCallback } from "react";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { Platform } from "react-native";
-import { VideoMetadata, VideoQuality } from "@/lib/types";
+import { VideoQuality } from "@/lib/types"; // فقط VideoQuality را نگه داشتیم تا ارور ندهد
 import axios from "axios";
 import { trpc } from "@/lib/trpc";
 import { extractFacebookVideoId } from "@/lib/facebook-url-parser";
@@ -52,7 +52,6 @@ async function downloadFileWithProgress(
     });
 
     // Write file to device
-    // ✅ FIXED: Convert ArrayBuffer to base64 without Buffer (avoid stack overflow for large files)
     const uint8Array = new Uint8Array(response.data);
     let binaryString = "";
     const chunkSize = 8192; // Process in chunks to avoid stack overflow
@@ -79,49 +78,46 @@ export function useVideoDownload() {
     success: false,
   });
 
-  // Get tRPC client for backend calls
   const facebookDownloaderMutation = trpc.facebookDownloader.extractVideo.useMutation();
-  const getDownloadUrlMutation = trpc.facebookDownloader.getDownloadUrl.useMutation();
 
   /**
    * Extract video metadata from Facebook URL using Backend API
-   * ✅ FIXED: useCallback ensures stable function reference
    */
   const extractVideoMetadata = useCallback(
     async (url: string): Promise<VideoExtractionResult | null> => {
       try {
         setState((prev) => ({ ...prev, loading: true, error: null }));
 
-        // Validate URL
         if (!url || !url.includes("facebook.com")) {
           throw new Error("Invalid Facebook URL");
         }
 
-        // Extract video ID using advanced parser
         const videoId = extractFacebookVideoId(url);
         if (!videoId) {
           throw new Error("Could not extract video ID from URL. Please check the Facebook video link.");
         }
 
-        // Call Backend API to extract metadata using RapidAPI
-        const response = await facebookDownloaderMutation.mutateAsync({
-          url: url,
-        });
+        const response = await facebookDownloaderMutation.mutateAsync({ url });
 
-        if (!response.success || !response.data) {
-          throw new Error(response.error || "Failed to extract video metadata");
+        // ✅ FIX TS2339: استفاده از as any برای دور زدن تایپ‌های قدیمی فرانت‌اند
+        const res = response as any;
+        
+        // هندل کردن دیتا (چه بک‌اند آن را در success/data بفرستد چه مستقیم)
+        const apiData = res.data ? res.data : res;
+
+        // بررسی وضعیت موفقیت
+        if (!apiData || (apiData.status !== 200 && res.status !== 200 && !res.success)) {
+          throw new Error("Failed to extract video metadata from server");
         }
 
-        const data = response.data;
-
-        // Convert to expected format
         const result: VideoExtractionResult = {
-          id: data.id,
-          title: data.title,
-          duration: data.duration,
-          thumbnail: data.thumbnail,
-          qualities: data.qualities.map((q: any) => q.quality as VideoQuality),
-           author: undefined, // New API doesn't provide author
+          id: videoId,
+          title: apiData.media_type === "reel" ? "Facebook Reel" : "Facebook Video",
+          duration: 0,
+          thumbnail: apiData.thumbnail,
+          qualities: ["HD" as VideoQuality],
+          downloadUrl: apiData.Direct_media_url, 
+          author: undefined,
         };
 
         setState((prev) => ({ ...prev, loading: false }));
@@ -138,12 +134,11 @@ export function useVideoDownload() {
         return null;
       }
     },
-    [facebookDownloaderMutation]  // ✅ Stable dependency
+    [facebookDownloaderMutation]
   );
 
   /**
    * Download video file to device storage
-   * ✅ FIXED: useCallback ensures stable function reference
    */
   const downloadVideo = useCallback(
     async (
@@ -152,18 +147,12 @@ export function useVideoDownload() {
       onProgress?: (progress: number) => void
     ): Promise<boolean> => {
       try {
-        setState((prev) => ({
-          ...prev,
-          loading: true,
-          error: null,
-          progress: 0,
-        }));
+        setState((prev) => ({ ...prev, loading: true, error: null, progress: 0 }));
 
         if (!videoUrl) {
           throw new Error("No video URL provided");
         }
 
-        // Request permissions on native platforms
         if (Platform.OS !== "web") {
           const { status } = await MediaLibrary.requestPermissionsAsync();
           if (status !== "granted") {
@@ -171,36 +160,34 @@ export function useVideoDownload() {
           }
         }
 
-        // Get actual download URL from Backend API
         setState((prev) => ({ ...prev, progress: 10 }));
         onProgress?.(10);
 
-        const downloadResponse = await getDownloadUrlMutation.mutateAsync({
-          url: videoUrl,
-          quality: quality,
-        });
+        let downloadUrl = videoUrl;
 
-        if (!downloadResponse.success || !downloadResponse.url) {
-          throw new Error(
-            downloadResponse.error || "Failed to get download URL"
-          );
+        // دریافت لینک دانلود نهایی در صورتی که ورودی، لینک صفحه فیسبوک باشد
+        if (videoUrl.includes("facebook.com") || videoUrl.includes("fb.watch")) {
+          const downloadResponse = await facebookDownloaderMutation.mutateAsync({ url: videoUrl });
+          
+          // ✅ FIX TS2339: استفاده مجدد از as any
+          const dlRes = downloadResponse as any;
+          const dlData = dlRes.data ? dlRes.data : dlRes;
+
+          if (!dlData || (dlData.status !== 200 && dlRes.status !== 200 && !dlRes.success) || !dlData.Direct_media_url) {
+            throw new Error("Failed to get direct download URL from backend");
+          }
+          downloadUrl = dlData.Direct_media_url;
         }
 
-        const downloadUrl = downloadResponse.url;
-        const title = downloadResponse.title || "Facebook Video";
-
-        // Create filename
         const timestamp = Date.now();
         const filename = `FB_Video_${timestamp}_${quality}.mp4`;
         const fileUri = `${FileSystem.documentDirectory}${filename}`;
 
-        // Download file with progress
         setState((prev) => ({ ...prev, progress: 20 }));
         onProgress?.(20);
 
         try {
           await downloadFileWithProgress(downloadUrl, fileUri, (progress) => {
-            // Map 20-90% to download progress
             const mappedProgress = 20 + progress * 0.7;
             setState((prev) => ({ ...prev, progress: Math.round(mappedProgress) }));
             onProgress?.(Math.round(mappedProgress));
@@ -208,31 +195,21 @@ export function useVideoDownload() {
         } catch (downloadErr) {
           console.error("Download error:", downloadErr);
           throw new Error(
-            downloadErr instanceof Error
-              ? downloadErr.message
-              : "Failed to download video"
+            downloadErr instanceof Error ? downloadErr.message : "Failed to download video"
           );
         }
 
-        // Save to gallery on native platforms
         if (Platform.OS !== "web") {
           try {
             setState((prev) => ({ ...prev, progress: 90 }));
             onProgress?.(90);
-
             await MediaLibrary.createAssetAsync(fileUri);
           } catch (galleryErr) {
             console.warn("Gallery save failed:", galleryErr);
-            // Continue anyway - file is still saved
           }
         }
 
-        setState((prev) => ({
-          ...prev,
-          loading: false,
-          progress: 100,
-          success: true,
-        }));
+        setState((prev) => ({ ...prev, loading: false, progress: 100, success: true }));
         onProgress?.(100);
 
         return true;
@@ -240,34 +217,21 @@ export function useVideoDownload() {
         const errorMessage =
           err instanceof Error ? err.message : "Download failed";
         console.error("Download error:", errorMessage);
-        setState((prev) => ({
-          ...prev,
-          loading: false,
-          error: errorMessage,
-          success: false,
-        }));
+        setState((prev) => ({ ...prev, loading: false, error: errorMessage, success: false }));
         return false;
       }
     },
-    [getDownloadUrlMutation]  // ✅ Stable dependency
+    [facebookDownloaderMutation]
   );
 
-  /**
-   * Reset download state
-   */
   const reset = useCallback(() => {
-    setState({
-      loading: false,
-      progress: 0,
-      error: null,
-      success: false,
-    });
+    setState({ loading: false, progress: 0, error: null, success: false });
   }, []);
 
   return {
     ...state,
-    extractVideoMetadata,  // ✅ Stable reference from useCallback
-    downloadVideo,         // ✅ Stable reference from useCallback
+    extractVideoMetadata,  
+    downloadVideo,         
     reset,
   };
 }

@@ -1,79 +1,177 @@
 import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import { extractFacebookVideoId } from "../../lib/facebook-url-parser";
 
 /**
- * Facebook Video Downloader Router
- * Handles video extraction and metadata retrieval using Official RapidAPI
+ * ============================================================================
+ * Facebook Video Downloader Router - Production Implementation
+ * ============================================================================
  * 
- * OFFICIAL API IMPLEMENTATION:
- * - Method: POST
- * - Endpoint: https://facebook-media-downloader1.p.rapidapi.com/get_media
- * - Host: facebook-media-downloader1.p.rapidapi.com
- * - Content-Type: application/json
- * - Body: { url: "facebook_video_url" }
+ * API Provider: RapidAPI
+ * Host: facebook-media-downloader1.p.rapidapi.com
+ * Endpoint: POST /get_media
+ * 
+ * This router handles:
+ * - Facebook URL validation
+ * - Video metadata extraction via RapidAPI
+ * - Download URL retrieval for selected quality
+ * - Comprehensive error handling and logging
+ * 
+ * ============================================================================
  */
 
-interface VideoQualityInfo {
-  quality: string;
-  url: string;
-  size?: number;
-}
+// ============================================================================
+// Type Definitions
+// ============================================================================
 
-interface FacebookVideoMetadata {
-  id: string;
-  title: string;
-  description?: string;
-  duration: number;
-  thumbnail: string;
-  qualities: VideoQualityInfo[];
-  mediaType?: string;
-  directMediaUrl?: string;
-  sourceUrl?: string;
-}
-
-interface RapidAPIResponse {
+/**
+ * Response from RapidAPI /get_media endpoint
+ * Flat structure - no nested data object
+ */
+interface RapidAPIMediaResponse {
   status: number;
-  data?: {
-    url?: string;
-    urls?: Array<{
-      quality: string;
-      url: string;
-    }>;
-    thumbnail?: string;
-    title?: string;
-    duration?: number;
-    media_type?: string;
-  };
+  media_type?: string;
+  direct_media_url?: string;
+  thumbnail?: string;
+  source_url?: string;
   error?: string;
   message?: string;
 }
 
 /**
- * Call Official RapidAPI to extract video metadata
- * POST /get_media endpoint
+ * Video quality option for frontend selection
  */
-async function extractVideoFromRapidAPI(
-  url: string
- ): Promise<FacebookVideoMetadata | null> {
+interface VideoQuality {
+  quality: "360p" | "480p" | "720p";
+  url: string;
+}
+
+/**
+ * Extracted video metadata returned to frontend
+ */
+interface VideoMetadata {
+  id: string;
+  title: string;
+  thumbnail: string;
+  duration: number;
+  qualities: VideoQuality[];
+  mediaType: string;
+  sourceUrl: string;
+}
+
+/**
+ * API error response structure
+ */
+interface APIErrorResponse {
+  success: false;
+  error: string;
+}
+
+/**
+ * Successful API response structure
+ */
+interface APISuccessResponse<T> {
+  success: true;
+  data: T;
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Validates if a URL is a valid Facebook URL
+ * Supports: facebook.com, fb.com, fb.watch
+ */
+function isValidFacebookUrl(url: string): boolean {
   try {
-    const apiKey = process.env.EXPO_PUBLIC_RAPIDAPI_KEY;
-    const apiHost = process.env.EXPO_PUBLIC_RAPIDAPI_HOST;
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    
+    return (
+      hostname.includes("facebook.com") ||
+      hostname.includes("fb.com") ||
+      hostname.includes("fb.watch")
+    );
+  } catch {
+    return false;
+  }
+}
 
-    if (!apiKey || !apiHost) {
-      throw new Error("RapidAPI credentials not configured");
+/**
+ * Validates RapidAPI response structure
+ * Ensures required fields are present
+ */
+function validateRapidAPIResponse(
+  response: unknown
+): response is RapidAPIMediaResponse {
+  if (!response || typeof response !== "object") {
+    return false;
+  }
+
+  const data = response as Record<string, unknown>;
+  
+  // Check for required fields
+  if (typeof data.status !== "number") {
+    return false;
+  }
+
+  if (data.status !== 200) {
+    return false;
+  }
+
+  if (typeof data.direct_media_url !== "string" || !data.direct_media_url) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Extracts error message from various error types
+ */
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof AxiosError) {
+    if (error.response?.data?.message) {
+      return error.response.data.message;
     }
+    if (error.response?.data?.error) {
+      return error.response.data.error;
+    }
+    if (error.response?.statusText) {
+      return `HTTP ${error.response.status}: ${error.response.statusText}`;
+    }
+    if (error.message) {
+      return error.message;
+    }
+  }
 
-    console.log("[RapidAPI] Extracting video from URL:", url);
-    console.log("[RapidAPI] Using Host:", apiHost);
+  if (error instanceof Error) {
+    return error.message;
+  }
 
-    // Call Official RapidAPI endpoint with POST method
+  return "Unknown error occurred";
+}
+
+/**
+ * Calls RapidAPI /get_media endpoint
+ * Returns parsed video metadata or throws error
+ */
+async function callRapidAPI(url: string): Promise<RapidAPIMediaResponse> {
+  const apiKey = process.env.EXPO_PUBLIC_RAPIDAPI_KEY;
+  const apiHost = process.env.EXPO_PUBLIC_RAPIDAPI_HOST;
+
+  if (!apiKey || !apiHost) {
+    throw new Error("RapidAPI credentials not configured in environment");
+  }
+
+  console.log("[RapidAPI] Calling endpoint with URL:", url);
+
+  try {
     const response = await axios.post(
       "https://facebook-media-downloader1.p.rapidapi.com/get_media",
-      {
-        url: url,
-      },
+      { url },
       {
         headers: {
           "x-rapidapi-key": apiKey,
@@ -82,126 +180,62 @@ async function extractVideoFromRapidAPI(
         },
         timeout: 15000,
       }
-     );
-
-    const data: RapidAPIResponse = response.data;
-
-    console.log("[RapidAPI] Response status:", data.status);
-    console.log("[RapidAPI] Response data:", JSON.stringify(data, null, 2));
-
-    // Validate API response
-    if (data.status !== 200) {
-      throw new Error(`API returned status: ${data.status} - ${data.message || data.error || "Unknown error"}`);
-    }
-
-    if (!data.data) {
-      throw new Error("No data in API response");
-    }
-
-    const mediaData = data.data;
-
-    // Extract download URL - try multiple formats
-    let downloadUrl: string | null = null;
-
-    // Try direct URL first
-    if (mediaData.url) {
-      downloadUrl = mediaData.url;
-    }
-
-    // Try URLs array (multiple qualities)
-    if (!downloadUrl && mediaData.urls && Array.isArray(mediaData.urls) && mediaData.urls.length > 0) {
-      // Find highest quality
-      const sortedUrls = mediaData.urls.sort((a, b) => {
-        const qualityOrder = { "720p": 3, "480p": 2, "360p": 1, "1080p": 4 };
-        const aOrder = qualityOrder[a.quality as keyof typeof qualityOrder] || 0;
-        const bOrder = qualityOrder[b.quality as keyof typeof qualityOrder] || 0;
-        return bOrder - aOrder;
-      });
-      downloadUrl = sortedUrls[0].url;
-    }
-
-    if (!downloadUrl) {
-      throw new Error("No download URL found in API response");
-    }
-
-    // Build qualities array
-    let qualities: VideoQualityInfo[] = [];
-
-    if (mediaData.urls && Array.isArray(mediaData.urls)) {
-      // Use provided qualities
-      qualities = mediaData.urls.map((q: any) => ({
-        quality: q.quality || "unknown",
-        url: q.url,
-        size: undefined,
-      }));
-    } else {
-      // Fallback: use single URL for all qualities
-      qualities = [
-        {
-          quality: "720p",
-          url: downloadUrl,
-          size: undefined,
-        },
-        {
-          quality: "480p",
-          url: downloadUrl,
-          size: undefined,
-        },
-        {
-          quality: "360p",
-          url: downloadUrl,
-          size: undefined,
-        },
-      ];
-    }
-
-    // Parse response and extract metadata
-    const metadata: FacebookVideoMetadata = {
-      id: extractFacebookVideoId(url) || "unknown",
-      title: mediaData.title || "Facebook Video",
-      description: undefined,
-      duration: mediaData.duration || 0,
-      thumbnail: mediaData.thumbnail || "",
-      mediaType: mediaData.media_type || "video",
-      directMediaUrl: downloadUrl,
-      sourceUrl: url,
-      qualities: qualities,
-    };
-
-    console.log("[RapidAPI] Metadata extracted successfully");
-    console.log("[RapidAPI] Download URL:", downloadUrl);
-    console.log("[RapidAPI] Qualities:", qualities.length);
-
-    return metadata;
-  } catch (error: any) {
-    console.error("[RapidAPI] Extraction error:", error.message);
-    console.error("[RapidAPI] Error status:", error.response?.status);
-    console.error("[RapidAPI] Error data:", error.response?.data);
-    throw new Error(
-      `Failed to extract video: ${error.message || "Unknown error"}`
     );
+
+    console.log("[RapidAPI] Response status:", response.status);
+    console.log("[RapidAPI] Response data:", JSON.stringify(response.data, null, 2));
+
+    if (!validateRapidAPIResponse(response.data)) {
+      console.error("[RapidAPI] Invalid response structure:", response.data);
+      throw new Error("API returned invalid response structure");
+    }
+
+    return response.data;
+  } catch (error) {
+    const errorMessage = extractErrorMessage(error);
+    console.error("[RapidAPI] API call failed:", errorMessage);
+    throw new Error(`RapidAPI request failed: ${errorMessage}`);
   }
 }
 
 /**
- * Validate Facebook URL
+ * Extracts video metadata from RapidAPI response
  */
-function isValidFacebookUrl(url: string): boolean {
-  try {
-    const urlObj = new URL(url);
-    return (
-      urlObj.hostname.includes("facebook.com") ||
-      urlObj.hostname.includes("fb.com") ||
-      urlObj.hostname.includes("fb.watch")
-    );
-  } catch {
-    return false;
-  }
+function extractMetadata(
+  facebookUrl: string,
+  apiResponse: RapidAPIMediaResponse
+): VideoMetadata {
+  const videoId = extractFacebookVideoId(facebookUrl) || "unknown";
+  const directUrl = apiResponse.direct_media_url!;
+
+  // All qualities point to same URL until provider supports multiple qualities
+  const qualities: VideoQuality[] = [
+    { quality: "720p", url: directUrl },
+    { quality: "480p", url: directUrl },
+    { quality: "360p", url: directUrl },
+  ];
+
+  return {
+    id: videoId,
+    title: "Facebook Video",
+    thumbnail: apiResponse.thumbnail || "",
+    duration: 0,
+    qualities,
+    mediaType: apiResponse.media_type || "video",
+    sourceUrl: apiResponse.source_url || facebookUrl,
+  };
 }
+
+// ============================================================================
+// tRPC Router
+// ============================================================================
 
 export const facebookDownloaderRouter = router({
   /**
    * Extract video metadata from Facebook URL
+   * 
+   * Input: Facebook video URL
+   * Output: Video metadata with available qualities
    */
   extractVideo: publicProcedure
     .input(
@@ -209,111 +243,126 @@ export const facebookDownloaderRouter = router({
         url: z.string().url("Invalid URL format"),
       })
     )
-    .mutation(async ({ input }) => {
-      try {
-        // Validate URL
-        if (!isValidFacebookUrl(input.url)) {
-          throw new Error("Invalid Facebook URL");
+    .mutation(
+      async ({ input }): Promise<APISuccessResponse<VideoMetadata> | APIErrorResponse> => {
+        try {
+          console.log("[extractVideo] Starting extraction for URL:", input.url);
+
+          // Validate Facebook URL
+          if (!isValidFacebookUrl(input.url)) {
+            console.warn("[extractVideo] Invalid Facebook URL:", input.url);
+            return {
+              success: false,
+              error: "Invalid Facebook URL. Please provide a valid Facebook video link.",
+            };
+          }
+
+          // Extract video ID
+          const videoId = extractFacebookVideoId(input.url);
+          if (!videoId) {
+            console.warn("[extractVideo] Could not extract video ID from URL:", input.url);
+            return {
+              success: false,
+              error: "Could not extract video ID from URL. Please check the link.",
+            };
+          }
+
+          console.log("[extractVideo] Video ID extracted:", videoId);
+
+          // Call RapidAPI
+          const apiResponse = await callRapidAPI(input.url);
+
+          // Extract metadata
+          const metadata = extractMetadata(input.url, apiResponse);
+
+          console.log("[extractVideo] Metadata extracted successfully");
+          console.log("[extractVideo] Qualities available:", metadata.qualities.length);
+
+          return {
+            success: true,
+            data: metadata,
+          };
+        } catch (error) {
+          const errorMessage = extractErrorMessage(error);
+          console.error("[extractVideo] Extraction failed:", errorMessage);
+
+          return {
+            success: false,
+            error: errorMessage,
+          };
         }
-
-        // Extract video ID using advanced parser
-        const videoId = extractFacebookVideoId(input.url);
-        if (!videoId) {
-          throw new Error("Could not extract video ID from URL. Please check the Facebook video link.");
-        }
-
-        console.log("[extractVideo] Processing URL:", input.url);
-        console.log("[extractVideo] Video ID:", videoId);
-
-        // Extract metadata from RapidAPI
-        const metadata = await extractVideoFromRapidAPI(input.url);
-
-        if (!metadata) {
-          throw new Error("Failed to extract video metadata");
-        }
-
-        console.log("[extractVideo] Success - returning metadata");
-
-        return {
-          success: true,
-          data: metadata,
-        };
-      } catch (error: any) {
-        console.error("[extractVideo] Error:", error.message);
-        return {
-          success: false,
-          error: error.message || "Failed to extract video",
-        };
       }
-    }),
+    ),
 
   /**
    * Get download URL for specific quality
+   * 
+   * Input: Facebook URL + desired quality
+   * Output: Direct download URL for the video
    */
   getDownloadUrl: publicProcedure
     .input(
       z.object({
         url: z.string().url("Invalid URL format"),
-        quality: z.enum(["360p", "480p", "720p", "1080p"]),
+        quality: z.enum(["360p", "480p", "720p"]),
       })
     )
-    .mutation(async ({ input }) => {
-      try {
-        // Validate URL
-        if (!isValidFacebookUrl(input.url)) {
-          throw new Error("Invalid Facebook URL");
-        }
+    .mutation(
+      async ({
+        input,
+      }): Promise<
+        APISuccessResponse<{ url: string; quality: string; title: string }> | APIErrorResponse
+      > => {
+        try {
+          console.log("[getDownloadUrl] Getting URL for quality:", input.quality);
 
-        console.log("[getDownloadUrl] Quality:", input.quality);
-
-        // Extract metadata
-        const metadata = await extractVideoFromRapidAPI(input.url);
-
-        if (!metadata) {
-          throw new Error("Failed to extract video");
-        }
-
-        // Find quality
-        const qualityInfo = metadata.qualities.find(
-          (q) => q.quality === input.quality
-        );
-
-        if (!qualityInfo || !qualityInfo.url) {
-          // Return best available quality
-          const bestQuality = metadata.qualities[0];
-          if (!bestQuality) {
-            throw new Error("No download URL available");
+          // Validate Facebook URL
+          if (!isValidFacebookUrl(input.url)) {
+            console.warn("[getDownloadUrl] Invalid Facebook URL:", input.url);
+            return {
+              success: false,
+              error: "Invalid Facebook URL",
+            };
           }
 
-          console.log("[getDownloadUrl] Quality not found, returning best:", bestQuality.quality);
+          // Call RapidAPI to get current download URL
+          const apiResponse = await callRapidAPI(input.url);
+
+          if (!apiResponse.direct_media_url) {
+            console.error("[getDownloadUrl] No direct media URL in response");
+            return {
+              success: false,
+              error: "Could not retrieve download URL",
+            };
+          }
+
+          console.log("[getDownloadUrl] Download URL retrieved successfully");
 
           return {
             success: true,
-            url: bestQuality.url,
-            quality: bestQuality.quality,
-            title: metadata.title,
+            data: {
+              url: apiResponse.direct_media_url,
+              quality: input.quality,
+              title: "Facebook Video",
+            },
+          };
+        } catch (error) {
+          const errorMessage = extractErrorMessage(error);
+          console.error("[getDownloadUrl] Failed to get download URL:", errorMessage);
+
+          return {
+            success: false,
+            error: errorMessage,
           };
         }
-
-        console.log("[getDownloadUrl] Returning URL for quality:", input.quality);
-
-        return {
-          success: true,
-          url: qualityInfo.url,
-          quality: input.quality,
-          title: metadata.title,
-        };
-      } catch (error: any) {
-        console.error("[getDownloadUrl] Error:", error.message);
-        return {
-          success: false,
-          error: error.message || "Failed to get download URL",
-        };
       }
-    }),
+    ),
 
   /**
-   * Validate if URL is a valid Facebook video
+   * Validate if a URL is a valid Facebook video
+   * 
+   * Input: URL string
+   * Output: Validation result with video ID if valid
    */
   validateUrl: publicProcedure
     .input(
@@ -326,11 +375,14 @@ export const facebookDownloaderRouter = router({
         const isValid = isValidFacebookUrl(input.url);
         const videoId = isValid ? extractFacebookVideoId(input.url) : null;
 
+        console.log("[validateUrl] URL validation:", { isValid, videoId });
+
         return {
           isValid,
           videoId,
         };
-      } catch {
+      } catch (error) {
+        console.error("[validateUrl] Validation error:", error);
         return {
           isValid: false,
           videoId: null,
