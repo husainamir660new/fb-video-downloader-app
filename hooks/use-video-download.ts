@@ -1,6 +1,6 @@
 /**
  * useVideoDownload Hook
- * Real video download implementation with direct Backend integration
+ * Real video download implementation with direct Deep-Search Backend integration
  * Handles video extraction, quality selection, and actual file download
  */
 
@@ -30,33 +30,80 @@ interface VideoExtractionResult {
   author?: string;
 }
 
-// 🛠 تابع کمکی هوشمند برای استخراج لینک دانلود از هر نوع ساختار پاسخ بک‌اند (حروف بزرگ/کوچک یا تو در تو)
-const getMediaUrl = (res: any): string | null => {
-  if (!res) return null;
-  if (res.Direct_media_url) return res.Direct_media_url;
-  if (res.direct_media_url) return res.direct_media_url;
-  if (res.url) return res.url;
-  if (res.data) {
-    if (res.data.Direct_media_url) return res.data.Direct_media_url;
-    if (res.data.direct_media_url) return res.data.direct_media_url;
-    if (res.data.url) return res.data.url;
+// 🚀 اسکنر عمیق هوشمند: لینک ویدیو را از هر لایه یا کلیدی در پاسخ سرور (حتی به صورت تودرتو) پیدا می‌کند
+const findVideoUrlDeep = (obj: any): string | null => {
+  if (!obj) return null;
+  
+  if (typeof obj === "string") {
+    const isUrl = obj.startsWith("http://") || obj.startsWith("https://");
+    const isVideo = obj.includes(".mp4") || obj.includes("fbcdn.net") || obj.includes("video") || obj.includes("media");
+    const isThumbnail = obj.includes(".jpg") || obj.includes(".jpeg") || obj.includes(".png") || obj.includes("thumbnail");
+    
+    if (isUrl && isVideo && !isThumbnail) {
+      return obj;
+    }
+  }
+  
+  if (typeof obj === "object") {
+    const primaryKeys = ["Direct_media_url", "direct_media_url", "downloadUrl", "download_url", "url", "media_url", "video_url"];
+    for (const key of primaryKeys) {
+      if (obj[key] && typeof obj[key] === "string" && (obj[key].startsWith("http") || obj[key].includes("fbcdn"))) {
+        return obj[key];
+      }
+    }
+    
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const result = findVideoUrlDeep(obj[key]);
+        if (result) return result;
+      }
+    }
   }
   return null;
 };
 
-// 🛠 تابع کمکی هوشمند برای استخراج تامبنیل
-const getThumbnailUrl = (res: any): string | undefined => {
-  if (!res) return undefined;
-  if (res.thumbnail) return res.thumbnail;
-  if (res.data && res.data.thumbnail) return res.data.thumbnail;
+// 🚀 اسکنر عمیق برای پیدا کردن تصویر تامبنیل
+const findThumbnailUrlDeep = (obj: any): string | undefined => {
+  if (!obj) return undefined;
+  
+  if (typeof obj === "string") {
+    if ((obj.startsWith("http://") || obj.startsWith("https://")) && (obj.includes(".jpg") || obj.includes(".jpeg") || obj.includes(".png") || obj.includes("scontent"))) {
+      return obj;
+    }
+  }
+  
+  if (typeof obj === "object") {
+    const primaryKeys = ["thumbnail", "thumbnail_url", "thumb", "image", "picture"];
+    for (const key of primaryKeys) {
+      if (obj[key] && typeof obj[key] === "string") return obj[key];
+    }
+    
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const result = findThumbnailUrlDeep(obj[key]);
+        if (result) return result;
+      }
+    }
+  }
   return undefined;
 };
 
-// 🛠 تابع کمکی هوشمند برای تشخیص نوع مدیا
-const getMediaType = (res: any): string => {
-  if (!res) return "video";
-  if (res.media_type) return res.media_type;
-  if (res.data && res.data.media_type) return res.data.media_type;
+// 🚀 اسکنر عمیق برای تشخیص ریلز یا ویدیو بودن مدیا
+const findMediaTypeDeep = (obj: any): string => {
+  if (!obj) return "video";
+  if (typeof obj === "object") {
+    if (obj.media_type) return obj.media_type;
+    if (obj.type) return obj.type;
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const result = findMediaTypeDeep(obj[key]);
+        if (result && (result === "reel" || result === "video")) return result;
+      }
+    }
+  }
+  if (typeof obj === "string" && (obj === "reel" || obj === "video")) {
+    return obj;
+  }
   return "video";
 };
 
@@ -81,7 +128,6 @@ async function downloadFileWithProgress(
       },
     });
 
-    // Write file to device
     const uint8Array = new Uint8Array(response.data);
     let binaryString = "";
     const chunkSize = 8192; 
@@ -130,8 +176,8 @@ export function useVideoDownload() {
         const response = await facebookDownloaderMutation.mutateAsync({ url });
         const res = response as any;
 
-        // استخراج لینک مستقیم با متد هوشمند جدید
-        const extractedDownloadUrl = getMediaUrl(res);
+        // استخراج لینک دانلود با متد اسکن عمیق جدید
+        const extractedDownloadUrl = findVideoUrlDeep(res);
 
         if (!extractedDownloadUrl) {
           throw new Error("Failed to extract video download link from server response");
@@ -139,10 +185,11 @@ export function useVideoDownload() {
 
         const result: VideoExtractionResult = {
           id: videoId,
-          title: getMediaType(res) === "reel" ? "Facebook Reel" : "Facebook Video",
+          title: findMediaTypeDeep(res) === "reel" ? "Facebook Reel" : "Facebook Video",
           duration: 0,
-          thumbnail: getThumbnailUrl(res),
-          qualities: ["HD" as VideoQuality],
+          thumbnail: findThumbnailUrlDeep(res),
+          // هماهنگی دقیق با کیفیت‌های ۳ گانه دکمه‌های رابط کاربری شما در تصویر ارسالی
+          qualities: ["360p" as VideoQuality, "480p" as VideoQuality, "720p" as VideoQuality], 
           downloadUrl: extractedDownloadUrl, 
           author: undefined,
         };
@@ -192,12 +239,12 @@ export function useVideoDownload() {
 
         let downloadUrl = videoUrl;
 
-        // اگر ورودی تابع همچنان لینک خام فیسبوک باشد، آن را مجدداً به صورت پویا و هوشمند حل می‌کنیم
+        // اگر ورودی تابع لینک اصلی فیسبوک باشد، مجدداً لینک مستقیم را به صورت پویا پیدا می‌کنیم
         if (videoUrl.includes("facebook.com") || videoUrl.includes("fb.watch")) {
           const downloadResponse = await facebookDownloaderMutation.mutateAsync({ url: videoUrl });
           const dlRes = downloadResponse as any;
           
-          const extractedUrl = getMediaUrl(dlRes);
+          const extractedUrl = findVideoUrlDeep(dlRes);
 
           if (!extractedUrl) {
             throw new Error("Failed to resolve direct download URL from backend response structure");
