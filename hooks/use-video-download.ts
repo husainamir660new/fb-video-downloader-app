@@ -8,7 +8,7 @@ import { useState, useCallback } from "react";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { Platform } from "react-native";
-import { VideoQuality } from "@/lib/types"; // فقط VideoQuality را نگه داشتیم تا ارور ندهد
+import { VideoQuality } from "@/lib/types";
 import axios from "axios";
 import { trpc } from "@/lib/trpc";
 import { extractFacebookVideoId } from "@/lib/facebook-url-parser";
@@ -29,6 +29,36 @@ interface VideoExtractionResult {
   downloadUrl?: string;
   author?: string;
 }
+
+// 🛠 تابع کمکی هوشمند برای استخراج لینک دانلود از هر نوع ساختار پاسخ بک‌اند (حروف بزرگ/کوچک یا تو در تو)
+const getMediaUrl = (res: any): string | null => {
+  if (!res) return null;
+  if (res.Direct_media_url) return res.Direct_media_url;
+  if (res.direct_media_url) return res.direct_media_url;
+  if (res.url) return res.url;
+  if (res.data) {
+    if (res.data.Direct_media_url) return res.data.Direct_media_url;
+    if (res.data.direct_media_url) return res.data.direct_media_url;
+    if (res.data.url) return res.data.url;
+  }
+  return null;
+};
+
+// 🛠 تابع کمکی هوشمند برای استخراج تامبنیل
+const getThumbnailUrl = (res: any): string | undefined => {
+  if (!res) return undefined;
+  if (res.thumbnail) return res.thumbnail;
+  if (res.data && res.data.thumbnail) return res.data.thumbnail;
+  return undefined;
+};
+
+// 🛠 تابع کمکی هوشمند برای تشخیص نوع مدیا
+const getMediaType = (res: any): string => {
+  if (!res) return "video";
+  if (res.media_type) return res.media_type;
+  if (res.data && res.data.media_type) return res.data.media_type;
+  return "video";
+};
 
 /**
  * Download file with progress tracking
@@ -54,7 +84,7 @@ async function downloadFileWithProgress(
     // Write file to device
     const uint8Array = new Uint8Array(response.data);
     let binaryString = "";
-    const chunkSize = 8192; // Process in chunks to avoid stack overflow
+    const chunkSize = 8192; 
     for (let i = 0; i < uint8Array.length; i += chunkSize) {
       const chunk = uint8Array.subarray(i, i + chunkSize);
       binaryString += String.fromCharCode.apply(null, Array.from(chunk));
@@ -98,25 +128,22 @@ export function useVideoDownload() {
         }
 
         const response = await facebookDownloaderMutation.mutateAsync({ url });
-
-        // ✅ FIX TS2339: استفاده از as any برای دور زدن تایپ‌های قدیمی فرانت‌اند
         const res = response as any;
-        
-        // هندل کردن دیتا (چه بک‌اند آن را در success/data بفرستد چه مستقیم)
-        const apiData = res.data ? res.data : res;
 
-        // بررسی وضعیت موفقیت
-        if (!apiData || (apiData.status !== 200 && res.status !== 200 && !res.success)) {
-          throw new Error("Failed to extract video metadata from server");
+        // استخراج لینک مستقیم با متد هوشمند جدید
+        const extractedDownloadUrl = getMediaUrl(res);
+
+        if (!extractedDownloadUrl) {
+          throw new Error("Failed to extract video download link from server response");
         }
 
         const result: VideoExtractionResult = {
           id: videoId,
-          title: apiData.media_type === "reel" ? "Facebook Reel" : "Facebook Video",
+          title: getMediaType(res) === "reel" ? "Facebook Reel" : "Facebook Video",
           duration: 0,
-          thumbnail: apiData.thumbnail,
+          thumbnail: getThumbnailUrl(res),
           qualities: ["HD" as VideoQuality],
-          downloadUrl: apiData.Direct_media_url, 
+          downloadUrl: extractedDownloadUrl, 
           author: undefined,
         };
 
@@ -165,18 +192,17 @@ export function useVideoDownload() {
 
         let downloadUrl = videoUrl;
 
-        // دریافت لینک دانلود نهایی در صورتی که ورودی، لینک صفحه فیسبوک باشد
+        // اگر ورودی تابع همچنان لینک خام فیسبوک باشد، آن را مجدداً به صورت پویا و هوشمند حل می‌کنیم
         if (videoUrl.includes("facebook.com") || videoUrl.includes("fb.watch")) {
           const downloadResponse = await facebookDownloaderMutation.mutateAsync({ url: videoUrl });
-          
-          // ✅ FIX TS2339: استفاده مجدد از as any
           const dlRes = downloadResponse as any;
-          const dlData = dlRes.data ? dlRes.data : dlRes;
+          
+          const extractedUrl = getMediaUrl(dlRes);
 
-          if (!dlData || (dlData.status !== 200 && dlRes.status !== 200 && !dlRes.success) || !dlData.Direct_media_url) {
-            throw new Error("Failed to get direct download URL from backend");
+          if (!extractedUrl) {
+            throw new Error("Failed to resolve direct download URL from backend response structure");
           }
-          downloadUrl = dlData.Direct_media_url;
+          downloadUrl = extractedUrl;
         }
 
         const timestamp = Date.now();
