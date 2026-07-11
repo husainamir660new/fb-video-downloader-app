@@ -26,7 +26,7 @@ interface NativeScrapeResult {
 }
 
 // 2. تنظیمات و ابزارهای کمکی
-const DESKTOP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+const DESKTOP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
 
 function isValidFacebookUrl(url: string): boolean {
@@ -35,71 +35,84 @@ function isValidFacebookUrl(url: string): boolean {
 
 const decodeFBUrl = (rawUrl: string): string => {
   try {
-    return rawUrl.replace(/\\u0025/g, "%").replace(/\\/g, "").replace(/&amp;/g, "&");
+    return rawUrl
+      .replace(/\\u003a/g, ":")
+      .replace(/\\u0025/g, "%")
+      .replace(/\\u0026/g, "&")
+      .replace(/\\\/ /g, "/")
+      .replace(/\\/g, "")
+      .replace(/&amp;/g, "&");
   } catch { return rawUrl; }
 };
 
 /**
- * 🔍 آدرس‌یاب فوق‌پیشرفته (مجهز به رادار رمزگشایی پارامترهای امنیتی فیسبوک)
+ * 🔍 آدرس‌یاب فوق‌پیشرفته مجهز به رادار اسکن متن خام برای شکار لینک‌های واقعی
  */
 async function resolveUrl(url: string): Promise<string> {
   if (!url.includes("share") && !url.includes("fb.watch")) return url;
   
-  console.log("[Resolver] Deep Scanning short link:", url);
-  
-  const userAgents = [DESKTOP_USER_AGENT, MOBILE_USER_AGENT];
+  console.log("[Resolver] Initializing Aggressive Radar Scan for short link:", url);
+  const userAgents = [MOBILE_USER_AGENT, DESKTOP_USER_AGENT];
   
   for (const ua of userAgents) {
     try {
       const response = await axios.get(url, {
         headers: { 
           "User-Agent": ua,
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.5"
         },
         maxRedirects: 5,
-        timeout: 7000,
+        timeout: 8000,
         validateStatus: (status) => status >= 200 && status < 500
       });
 
       const finalReachedUrl = response.request?.res?.responseUrl || "";
-      console.log("[Resolver] Target destination reached:", finalReachedUrl);
-
-      // 🔥 تکنیک اول: شکار لینک از پارامتر مخفی ?next= در گیت امنیتی لاگین فیسبوک
-      if (finalReachedUrl.includes("login") && finalReachedUrl.includes("next=")) {
-        const urlObj = new URL(finalReachedUrl);
-        const nextParam = urlObj.searchParams.get("next");
-        if (nextParam) {
-          const decodedNext = decodeURIComponent(nextParam);
-          if (decodedNext.includes("/reel/") || decodedNext.includes("/videos/") || decodedNext.includes("v=")) {
-            console.log("[Resolver] Success! Extracted from Facebook Security Gateway:", decodedNext);
-            return decodedNext;
-          }
-        }
-      }
-
-      // تکنیک دوم: اگر ریدایرکت سالم بود و مستقیما به ویدیو رسید
+      
+      // حالت اول: اگر ریدایرکت استاندارد شبکه مستقیماً به ویدیو رسید
       if (finalReachedUrl.includes("/reel/") || finalReachedUrl.includes("/videos/") || finalReachedUrl.includes("v=")) {
-        console.log("[Resolver] Success! Resolved directly via network:", finalReachedUrl);
+        console.log("[Resolver] Resolved via Network Redirect:", finalReachedUrl);
         return finalReachedUrl;
       }
 
-      // تکنیک سوم: اسکن کدهای تگ Meta صفحات میانی
+      // حالت دوم: فیسبوک صفحه را با وضعیت 200 قفل کرده؛ رادار متنی وارد عمل می‌شود
       const html = response.data;
-      if (typeof html === "string") {
-        const ogUrlMatch = html.match(/property="og:url"\s+content="([^"]+)"/) || html.match(/"target_url":"([^"]+)"/);
-        if (ogUrlMatch && ogUrlMatch[1]) {
-          const extractedMeta = decodeFBUrl(ogUrlMatch[1]);
-          console.log("[Resolver] Success! Extracted from Meta OpenGraph:", extractedMeta);
-          return extractedMeta;
+      if (typeof html === "string" && html.length > 0) {
+        // ۱. رمزگشایی و یکدست‌سازی کامل متون سورس صفحه برای حذف کدهای گمراه‌کننده فیسبوک
+        const cleanHtml = html
+          .replace(/\\\/ /g, "/")
+          .replace(/\\\/ /g, "/")
+          .replace(/\\/g, "")
+          .replace(/\\u003a/g, ":")
+          .replace(/\\u0026/g, "&")
+          .replace(/&amp;/g, "&");
+
+        // ۲. ریجکس فوق‌العاده منعطف برای پیدا کردن هرگونه لینک ویدیو یا ریلز معتبر در کل سورس HTML
+        const videoLinkPattern = /(https?:\/\/(?:[a-zA-Z0-9-]+\.)?facebook\.com\/(?:[^\s"'`<>]+?\/(?:videos|reel)\/|watch\/?\?v=)[a-zA-Z0-9_\-\?&=\.]+)/i;
+        const match = cleanHtml.match(videoLinkPattern);
+        
+        if (match && match[1]) {
+          const extractedUrl = match[1];
+          console.log("[Resolver] Radar successfully captured hidden URL from HTML payload:", extractedUrl);
+          return extractedUrl;
+        }
+
+        // ۳. بررسی پشتیبان برای پارامتر مخفی next در صفحات امنیتی فیسبوک
+        if (finalReachedUrl.includes("next=")) {
+          const urlObj = new URL(finalReachedUrl);
+          const nextParam = urlObj.searchParams.get("next");
+          if (nextParam) {
+            console.log("[Resolver] Captured URL from login gate gateway:", nextParam);
+            return decodeURIComponent(nextParam);
+          }
         }
       }
     } catch (e) {
-      console.warn("[Resolver] Scan strategy bypass active.");
+      console.warn("[Resolver] Strategy failed for current User-Agent, trying next...");
     }
   }
 
-  console.log("[Resolver] Warning: Fallback to original URL due to aggressive blocking.");
+  console.log("[Resolver] Critical: All search layers exhausted. Forcing original URL.");
   return url;
 }
 
@@ -182,7 +195,7 @@ async function scrapeFacebookVideo(url: string): Promise<NativeScrapeResult> {
 
   // موتور دوم: اسکن لایه موبایل گیت‌وی (`m.facebook.com`)
   try {
-    const mobileUrl = finalUrl.replace("www.facebook.com", "m.facebook.com").replace("mbasic.facebook.com", "m.facebook.com");
+    const mobileUrl = finalUrl.replace("www.facebook.com", "m.facebook.com");
     console.log("[Scraper] Running Engine 2 (Mobile Gateway):", mobileUrl);
     const res = await axios.get(mobileUrl, { headers: { "User-Agent": MOBILE_USER_AGENT }, timeout: 10000 });
     const data = extractDataFromHtml(res.data);
