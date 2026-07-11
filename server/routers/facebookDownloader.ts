@@ -5,7 +5,7 @@ import { extractFacebookVideoId } from "../../lib/facebook-url-parser";
 
 /**
  * ============================================================================
- * Facebook Video Downloader Router - Hybrid Triple-Engine Scraper with Resolver
+ * Facebook Video Downloader Router - Ultra Resilient Scraper with 3xx Location Hunter
  * ============================================================================
  */
 
@@ -41,9 +41,9 @@ interface NativeScrapeResult {
 }
 
 const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Mobile/15E148 Safari/604.1",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Mobile/15E148 Safari/604.1"
 ];
 
 function isValidFacebookUrl(url: string): boolean {
@@ -78,7 +78,7 @@ const decodeFBUrl = (rawUrl: string): string => {
 };
 
 /**
- * 🔍 موتور آنالیز عمیق کدهای متنی برای بیرون کشیدن لینک‌های استریم
+ * 🔍 موتور آنالیز کدهای متنی برای استخراج لینک‌های مستقیم ویدیو
  */
 function extractUrlsFromHtml(html: string): NativeScrapeResult | null {
   let hdUrl = "";
@@ -112,7 +112,7 @@ function extractUrlsFromHtml(html: string): NativeScrapeResult | null {
     }
   }
 
-  // اسکنر اضطراری CDN
+  // اسکنر کمکی CDN
   if (!sdUrl) {
     const fbcdnRegex = /(https?[:\\\/]+[^\s"'`<>]+?fbcdn\.net[^\s"'`<>]+?)(?=\\"|"|'|&quot;|\s|$)/gi;
     const allMatches = html.match(fbcdnRegex) || [];
@@ -150,66 +150,87 @@ function extractUrlsFromHtml(html: string): NativeScrapeResult | null {
 }
 
 /**
- * 🚀 اسکرپر چندموتوره مجهز به حل‌کننده لینک‌های کوتاه فیسبوک
+ * 🚀 اسکرپر اصلی مجهز به سیستم شکارچی هوشمند لینک‌های ۳۰۲
  */
 async function scrapeFacebookVideo(url: string): Promise<NativeScrapeResult> {
   let targetUrl = url;
-  const randomUserAgent = USER_AGENTS[0]; // اولویت با ایجنت موبایل
+  const randomUserAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 
-  // 🔹 گام ۰: حل کردن لینک‌های کوتاه شده (share/v)
-  if (url.includes("facebook.com/share") || url.includes("fb.watch") || url.includes("fb.com")) {
+  // 🔹 مرحله اول: شکارچی هوشمند لینک‌های کوتاه شده (share/v یا fb.watch)
+  if (url.includes("facebook.com/share") || url.includes("fb.watch") || url.includes("fb.com/share")) {
     try {
-      console.log("[Resolver] Resolving short/share link redirects...");
-      const res = await axios.head(url, {
-        headers: { "User-Agent": USER_AGENTS[2] },
-        maxRedirects: 5
+      console.log("[LocationHunter] Intercepting HTTP 3xx Redirect Target...");
+      const resolveRes = await axios.get(url, {
+        headers: { 
+          "User-Agent": USER_AGENTS[0],
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" 
+        },
+        maxRedirects: 0, // قطع خودکار برای استخراج هدر بدون مواجهه با بات‌یاب
+        validateStatus: (status) => status >= 200 && status < 400
       });
-      if (res.request?.res?.responseUrl) {
-        targetUrl = res.request.res.responseUrl;
-        console.log("[Resolver] Successfully expanded URL to:", targetUrl);
+
+      let redirectLocation = resolveRes.headers.location;
+      if (redirectLocation) {
+        if (redirectLocation.startsWith("/")) {
+          redirectLocation = `https://www.facebook.com${redirectLocation}`;
+        }
+        targetUrl = redirectLocation;
+        console.log("[LocationHunter] Successfully decoded short link to:", targetUrl);
       }
     } catch (e) {
-      console.warn("[Resolver] Link expansion failed, using original URL.");
+      // راهکار جایگزین مرحله اول در صورت ناموفق بودن قطع خودکار
+      try {
+        const fallbackResolve = await axios.get(url, { 
+          headers: { "User-Agent": USER_AGENTS[1] },
+          timeout: 6000 
+        });
+        if (fallbackResolve.request?.res?.responseUrl) {
+          targetUrl = fallbackResolve.request.res.responseUrl;
+          console.log("[LocationHunter] Standard fallback expanded URL to:", targetUrl);
+        }
+      } catch (innerErr) {
+        console.warn("[LocationHunter] Could not expand URL, attempting direct parse.");
+      }
     }
   }
 
-  // 🔹 موتور اول (جدید و قدرتمند): Gateway موبایل فیسبوک
-  try {
-    const mobileUrl = targetUrl
-      .replace("www.facebook.com", "m.facebook.com")
-      .replace("web.facebook.com", "m.facebook.com");
-    
-    console.log("[Scraper] Running Engine 1 (Mobile Gateway Scan):", mobileUrl);
-    const response = await axios.get(mobileUrl, {
-      headers: { "User-Agent": randomUserAgent, "Cache-Control": "no-cache" },
-      timeout: 10000
-    });
-
-    const result = extractUrlsFromHtml(response.data);
-    if (result) {
-      console.log("[Scraper] Engine 1 (Mobile) fetched data successfully!");
-      return result;
-    }
-  } catch (e) {
-    console.warn("[Scraper] Engine 1 (Mobile) failed or timed out.");
-  }
-
-  // 🔹 موتور دوم: پورتال پلاگین امبد دسکتاپ
+  // 🔹 موتور اول: پورتال پلاگین امبد دسکتاپ (موتور برنده ویدیوی قبلی شما)
   try {
     const embedUrl = `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(targetUrl)}`;
-    console.log("[Scraper] Running Engine 2 (Embed Portal):", embedUrl);
+    console.log("[Scraper] Running Engine 1 (Embed Portal):", embedUrl);
     const response = await axios.get(embedUrl, {
-      headers: { "User-Agent": USER_AGENTS[2], "Cache-Control": "no-cache" },
+      headers: { "User-Agent": USER_AGENTS[0], "Cache-Control": "no-cache" },
       timeout: 10000,
     });
 
     const result = extractUrlsFromHtml(response.data);
     if (result) {
-      console.log("[Scraper] Engine 2 (Embed) fetched data successfully!");
+      console.log("[Scraper] Engine 1 (Embed) fetched data successfully!");
       return result;
     }
   } catch (e) {
-    console.warn("[Scraper] Engine 2 bypassed.");
+    console.warn("[Scraper] Engine 1 bypassed.");
+  }
+
+  // 🔹 موتور دوم: Gateway موبایل فیسبوک
+  try {
+    const mobileUrl = targetUrl
+      .replace("www.facebook.com", "m.facebook.com")
+      .replace("web.facebook.com", "m.facebook.com");
+    
+    console.log("[Scraper] Running Engine 2 (Mobile Gateway Scan):", mobileUrl);
+    const response = await axios.get(mobileUrl, {
+      headers: { "User-Agent": USER_AGENTS[1], "Cache-Control": "no-cache" },
+      timeout: 10000
+    });
+
+    const result = extractUrlsFromHtml(response.data);
+    if (result) {
+      console.log("[Scraper] Engine 2 (Mobile) fetched data successfully!");
+      return result;
+    }
+  } catch (e) {
+    console.warn("[Scraper] Engine 2 failed.");
   }
 
   throw new Error("Facebook security actively rejected the stream request. Please try another video link.");
