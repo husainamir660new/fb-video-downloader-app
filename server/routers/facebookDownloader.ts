@@ -5,7 +5,7 @@ import { extractFacebookVideoId } from "../../lib/facebook-url-parser";
 
 /**
  * ============================================================================
- * Facebook Video Downloader Router - Ultra Resilient Dual-Engine Scraper
+ * Facebook Video Downloader Router - Hybrid Triple-Engine Scraper with Resolver
  * ============================================================================
  */
 
@@ -41,10 +41,9 @@ interface NativeScrapeResult {
 }
 
 const USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Mobile/15E148 Safari/604.1"
+  "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Mobile/15E148 Safari/604.1",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 ];
 
 function isValidFacebookUrl(url: string): boolean {
@@ -66,9 +65,6 @@ function extractErrorMessage(error: unknown): string {
   return "Unknown error occurred";
 }
 
-/**
- * 🛠 ردیابی و رمزگشایی پیشرفته لینک‌های انکود شده فیسبوک
- */
 const decodeFBUrl = (rawUrl: string): string => {
   try {
     let clean = rawUrl.replace(/&amp;/g, "&").replace(/\\+$/, "");
@@ -82,29 +78,24 @@ const decodeFBUrl = (rawUrl: string): string => {
 };
 
 /**
- * 🔍 موتور آنالیز محتوای HTML - مجهز به رِجِکس‌های منعطف و اسکنر عمیق CDN
+ * 🔍 موتور آنالیز عمیق کدهای متنی برای بیرون کشیدن لینک‌های استریم
  */
 function extractUrlsFromHtml(html: string): NativeScrapeResult | null {
   let hdUrl = "";
   let sdUrl = "";
   let thumbnail = "";
 
-  // رِجِکس‌های پیشرفته که تغییرات کوتیشن فیسبوک (\", ', &quot;) را پوشش می‌دهند
   const hdRegexes = [
-    /(?:playable_url_quality_hd|browser_native_hd_url|hd_src)[^\w]+(https?.*?[^\\])(?=\\"|"|'|&quot;)/i,
-    /"playable_url_quality_hd":"([^"]+)"/,
-    /hd_src:"([^"]+)"/
+    /(?:playable_url_quality_hd|browser_native_hd_url|hd_src)[^\w]+(https?.*?)(?=\\"|"|'|&quot;)/i,
+    /"playable_url_quality_hd":"([^"]+)"/
   ];
 
   const sdRegexes = [
-    /(?:playable_url|browser_native_sd_url|sd_src)[^\w]+(https?.*?[^\\])(?=\\"|"|'|&quot;)/i,
+    /(?:playable_url|browser_native_sd_url|sd_src|video_src)[^\w]+(https?.*?)(?=\\"|"|'|&quot;)/i,
     /"playable_url":"([^"]+)"/,
-    /sd_src:"([^"]+)"/,
-    /meta property="og:video" content="([^"]+)"/,
-    /meta property="og:video:secure_url" content="([^"]+)"/
+    /meta property="og:video" content="([^"]+)"/
   ];
 
-  // ۱. تلاش برای استخراج HD
   for (const regex of hdRegexes) {
     const match = html.match(regex);
     if (match && match[1]) {
@@ -113,7 +104,6 @@ function extractUrlsFromHtml(html: string): NativeScrapeResult | null {
     }
   }
 
-  // ۲. تلاش برای استخراج SD
   for (const regex of sdRegexes) {
     const match = html.match(regex);
     if (match && match[1]) {
@@ -122,12 +112,10 @@ function extractUrlsFromHtml(html: string): NativeScrapeResult | null {
     }
   }
 
-  // 🌟 معجزه اسکنر عمیق: اگر کلیدها یافت نشدند، لینک‌های مستقیم سرور فیسبوک را استخراج کن
+  // اسکنر اضطراری CDN
   if (!sdUrl) {
-    console.log("[ScraperEngine] Key matching missed. Activating Deep FBCDN Link Scanner...");
     const fbcdnRegex = /(https?[:\\\/]+[^\s"'`<>]+?fbcdn\.net[^\s"'`<>]+?)(?=\\"|"|'|&quot;|\s|$)/gi;
     const allMatches = html.match(fbcdnRegex) || [];
-    
     for (const rawMatch of allMatches) {
       const decoded = decodeFBUrl(rawMatch);
       if (decoded.includes("/v/") || decoded.includes(".mp4") || decoded.includes("cat=")) {
@@ -141,9 +129,7 @@ function extractUrlsFromHtml(html: string): NativeScrapeResult | null {
     }
   }
 
-  // ۳. استخراج Thumbnail
   const thumbRegexes = [
-    /"preferred_thumbnail":{"image":{"uri":"([^"]+)"}}/,
     /meta property="og:image" content="([^"]+)"/,
     /"thumbnailUrl":"([^"]+)"/
   ];
@@ -164,45 +150,66 @@ function extractUrlsFromHtml(html: string): NativeScrapeResult | null {
 }
 
 /**
- * 🚀 ساختار هسته اسکرپر مجهز به موتور دوگانه موازی/ترتیبی
+ * 🚀 اسکرپر چندموتوره مجهز به حل‌کننده لینک‌های کوتاه فیسبوک
  */
 async function scrapeFacebookVideo(url: string): Promise<NativeScrapeResult> {
-  const randomUserAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-  
-  // 🔹 موتور اول: پورتال امبد فیسبوک
-  try {
-    const embedUrl = `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}`;
-    console.log("[Scraper] Running Engine 1 (Embed Portal):", embedUrl);
-    
-    const response = await axios.get(embedUrl, {
-      headers: { "User-Agent": randomUserAgent, "Cache-Control": "no-cache" },
-      timeout: 10000,
-    });
+  let targetUrl = url;
+  const randomUserAgent = USER_AGENTS[0]; // اولویت با ایجنت موبایل
 
-    const result = extractUrlsFromHtml(response.data);
-    if (result) {
-      console.log("[Scraper] Engine 1 successfully extracted links!");
-      return result;
+  // 🔹 گام ۰: حل کردن لینک‌های کوتاه شده (share/v)
+  if (url.includes("facebook.com/share") || url.includes("fb.watch") || url.includes("fb.com")) {
+    try {
+      console.log("[Resolver] Resolving short/share link redirects...");
+      const res = await axios.head(url, {
+        headers: { "User-Agent": USER_AGENTS[2] },
+        maxRedirects: 5
+      });
+      if (res.request?.res?.responseUrl) {
+        targetUrl = res.request.res.responseUrl;
+        console.log("[Resolver] Successfully expanded URL to:", targetUrl);
+      }
+    } catch (e) {
+      console.warn("[Resolver] Link expansion failed, using original URL.");
     }
-  } catch (e) {
-    console.warn("[Scraper] Engine 1 bypassed due to network/timeout.");
   }
 
-  // 🔹 موتور دوم (Fallback): اسکن مستقیم و بومی صفحه ویدیو
+  // 🔹 موتور اول (جدید و قدرتمند): Gateway موبایل فیسبوک
   try {
-    console.log("[Scraper] Running Engine 2 (Direct Watch Page Scan)...");
-    const response = await axios.get(url, {
+    const mobileUrl = targetUrl
+      .replace("www.facebook.com", "m.facebook.com")
+      .replace("web.facebook.com", "m.facebook.com");
+    
+    console.log("[Scraper] Running Engine 1 (Mobile Gateway Scan):", mobileUrl);
+    const response = await axios.get(mobileUrl, {
       headers: { "User-Agent": randomUserAgent, "Cache-Control": "no-cache" },
+      timeout: 10000
+    });
+
+    const result = extractUrlsFromHtml(response.data);
+    if (result) {
+      console.log("[Scraper] Engine 1 (Mobile) fetched data successfully!");
+      return result;
+    }
+  } catch (e) {
+    console.warn("[Scraper] Engine 1 (Mobile) failed or timed out.");
+  }
+
+  // 🔹 موتور دوم: پورتال پلاگین امبد دسکتاپ
+  try {
+    const embedUrl = `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(targetUrl)}`;
+    console.log("[Scraper] Running Engine 2 (Embed Portal):", embedUrl);
+    const response = await axios.get(embedUrl, {
+      headers: { "User-Agent": USER_AGENTS[2], "Cache-Control": "no-cache" },
       timeout: 10000,
     });
 
     const result = extractUrlsFromHtml(response.data);
     if (result) {
-      console.log("[Scraper] Engine 2 successfully extracted links!");
+      console.log("[Scraper] Engine 2 (Embed) fetched data successfully!");
       return result;
     }
   } catch (e) {
-    console.warn("[Scraper] Engine 2 failed.");
+    console.warn("[Scraper] Engine 2 bypassed.");
   }
 
   throw new Error("Facebook security actively rejected the stream request. Please try another video link.");
