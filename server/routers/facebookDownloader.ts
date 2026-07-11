@@ -1,14 +1,9 @@
 import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
-import axios, { AxiosError } from "axios";
+import axios from "axios";
 import { extractFacebookVideoId } from "../../lib/facebook-url-parser";
 
-/**
- * ============================================================================
- * Facebook Video Downloader Router - Ultra Resilient Scraper with 3xx Location Hunter
- * ============================================================================
- */
-
+// 1. Interfaces
 interface VideoQuality {
   quality: "360p" | "480p" | "720p";
   url: string;
@@ -24,247 +19,129 @@ interface VideoMetadata {
   sourceUrl: string;
 }
 
-interface APIErrorResponse {
-  success: false;
-  error: string;
-}
-
-interface APISuccessResponse<T> {
-  success: true;
-  data: T;
-}
-
 interface NativeScrapeResult {
   sdUrl: string;
   hdUrl: string;
   thumbnail: string;
 }
 
-const USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Mobile/15E148 Safari/604.1"
-];
+// 2. Constants & Helpers
+const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 function isValidFacebookUrl(url: string): boolean {
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
-    return hostname.includes("facebook.com") || hostname.includes("fb.com") || hostname.includes("fb.watch");
-  } catch {
-    return false;
-  }
-}
-
-function extractErrorMessage(error: unknown): string {
-  if (error instanceof AxiosError) {
-    if (error.response?.data?.message) return error.response.data.message;
-    if (error.message) return error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return "Unknown error occurred";
+  return /facebook\.com|fb\.watch|fb\.com/.test(url);
 }
 
 const decodeFBUrl = (rawUrl: string): string => {
   try {
-    let clean = rawUrl.replace(/&amp;/g, "&").replace(/\\+$/, "");
-    if (clean.includes('\\')) {
-      return JSON.parse(`"${clean}"`);
-    }
-    return clean;
-  } catch {
-    return rawUrl.replace(/\\\/ /g, "/").replace(/\\/g, "").replace(/&amp;/g, "&");
-  }
+    return rawUrl.replace(/\\u0025/g, "%").replace(/\\/g, "").replace(/&amp;/g, "&");
+  } catch { return rawUrl; }
 };
 
 /**
- * 🔍 موتور آنالیز کدهای متنی برای استخراج لینک‌های مستقیم ویدیو
+ * 🔍 حل‌کننده هوشمند لینک‌های کوتاه فیسبوک
  */
-function extractUrlsFromHtml(html: string): NativeScrapeResult | null {
-  let hdUrl = "";
-  let sdUrl = "";
-  let thumbnail = "";
+async function resolveUrl(url: string): Promise<string> {
+  if (!url.includes("share") && !url.includes("fb.watch")) return url;
+  
+  try {
+    console.log("[Resolver] Expanding link:", url);
+    // استفاده از Axios برای دنبال کردن خودکار ریدایرکت‌ها
+    const response = await axios.get(url, {
+      headers: { "User-Agent": USER_AGENT },
+      maxRedirects: 10,
+      timeout: 8000
+    });
 
-  const hdRegexes = [
-    /(?:playable_url_quality_hd|browser_native_hd_url|hd_src)[^\w]+(https?.*?)(?=\\"|"|'|&quot;)/i,
-    /"playable_url_quality_hd":"([^"]+)"/
-  ];
-
-  const sdRegexes = [
-    /(?:playable_url|browser_native_sd_url|sd_src|video_src)[^\w]+(https?.*?)(?=\\"|"|'|&quot;)/i,
-    /"playable_url":"([^"]+)"/,
-    /meta property="og:video" content="([^"]+)"/
-  ];
-
-  for (const regex of hdRegexes) {
-    const match = html.match(regex);
-    if (match && match[1]) {
-      hdUrl = decodeFBUrl(match[1]);
-      break;
+    // اگر ریدایرکت‌ها آدرس نهایی را دادند
+    if (response.request?.res?.responseUrl) {
+      return response.request.res.responseUrl;
     }
-  }
 
-  for (const regex of sdRegexes) {
-    const match = html.match(regex);
-    if (match && match[1]) {
-      sdUrl = decodeFBUrl(match[1]);
-      break;
+    // اگر ریدایرکت خودکار نشد، بررسی تگ meta og:url
+    const ogUrlMatch = response.data.match(/property="og:url"\s+content="([^"]+)"/);
+    if (ogUrlMatch && ogUrlMatch[1]) {
+      return ogUrlMatch[1];
     }
+  } catch (e) {
+    console.warn("[Resolver] Could not fully expand, using original.");
   }
-
-  // اسکنر کمکی CDN
-  if (!sdUrl) {
-    const fbcdnRegex = /(https?[:\\\/]+[^\s"'`<>]+?fbcdn\.net[^\s"'`<>]+?)(?=\\"|"|'|&quot;|\s|$)/gi;
-    const allMatches = html.match(fbcdnRegex) || [];
-    for (const rawMatch of allMatches) {
-      const decoded = decodeFBUrl(rawMatch);
-      if (decoded.includes("/v/") || decoded.includes(".mp4") || decoded.includes("cat=")) {
-        if (!sdUrl) {
-          sdUrl = decoded;
-        } else if (!hdUrl && decoded !== sdUrl) {
-          hdUrl = decoded;
-          break;
-        }
-      }
-    }
-  }
-
-  const thumbRegexes = [
-    /meta property="og:image" content="([^"]+)"/,
-    /"thumbnailUrl":"([^"]+)"/
-  ];
-  for (const regex of thumbRegexes) {
-    const match = html.match(regex);
-    if (match && match[1]) {
-      thumbnail = decodeFBUrl(match[1]);
-      break;
-    }
-  }
-
-  const finalHd = hdUrl || sdUrl;
-  const finalSd = sdUrl || hdUrl;
-
-  if (!finalSd) return null;
-
-  return { sdUrl: finalSd, hdUrl: finalHd, thumbnail };
+  return url;
 }
 
 /**
- * 🚀 اسکرپر اصلی مجهز به سیستم شکارچی هوشمند لینک‌های ۳۰۲
+ * 🛠 استخراج‌کننده لینک‌های ویدیو
  */
-async function scrapeFacebookVideo(url: string): Promise<NativeScrapeResult> {
-  let targetUrl = url;
-  const randomUserAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+function extractDataFromHtml(html: string): NativeScrapeResult | null {
+  const hdMatch = html.match(/"playable_url_quality_hd":"([^"]+)"/);
+  const sdMatch = html.match(/"playable_url":"([^"]+)"/);
+  const thumbMatch = html.match(/"thumbnailUrl":"([^"]+)"/);
 
-  // 🔹 مرحله اول: شکارچی هوشمند لینک‌های کوتاه شده (share/v یا fb.watch)
-  if (url.includes("facebook.com/share") || url.includes("fb.watch") || url.includes("fb.com/share")) {
-    try {
-      console.log("[LocationHunter] Intercepting HTTP 3xx Redirect Target...");
-      const resolveRes = await axios.get(url, {
-        headers: { 
-          "User-Agent": USER_AGENTS[0],
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" 
-        },
-        maxRedirects: 0, // قطع خودکار برای استخراج هدر بدون مواجهه با بات‌یاب
-        validateStatus: (status) => status >= 200 && status < 400
-      });
+  const hdUrl = hdMatch ? decodeFBUrl(hdMatch[1]) : "";
+  const sdUrl = sdMatch ? decodeFBUrl(sdMatch[1]) : "";
+  const thumbnail = thumbMatch ? decodeFBUrl(thumbMatch[1]) : "";
 
-      let redirectLocation = resolveRes.headers.location;
-      if (redirectLocation) {
-        if (redirectLocation.startsWith("/")) {
-          redirectLocation = `https://www.facebook.com${redirectLocation}`;
-        }
-        targetUrl = redirectLocation;
-        console.log("[LocationHunter] Successfully decoded short link to:", targetUrl);
-      }
-    } catch (e) {
-      // راهکار جایگزین مرحله اول در صورت ناموفق بودن قطع خودکار
-      try {
-        const fallbackResolve = await axios.get(url, { 
-          headers: { "User-Agent": USER_AGENTS[1] },
-          timeout: 6000 
-        });
-        if (fallbackResolve.request?.res?.responseUrl) {
-          targetUrl = fallbackResolve.request.res.responseUrl;
-          console.log("[LocationHunter] Standard fallback expanded URL to:", targetUrl);
-        }
-      } catch (innerErr) {
-        console.warn("[LocationHunter] Could not expand URL, attempting direct parse.");
-      }
-    }
-  }
+  if (!sdUrl && !hdUrl) return null;
 
-  // 🔹 موتور اول: پورتال پلاگین امبد دسکتاپ (موتور برنده ویدیوی قبلی شما)
-  try {
-    const embedUrl = `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(targetUrl)}`;
-    console.log("[Scraper] Running Engine 1 (Embed Portal):", embedUrl);
-    const response = await axios.get(embedUrl, {
-      headers: { "User-Agent": USER_AGENTS[0], "Cache-Control": "no-cache" },
-      timeout: 10000,
-    });
-
-    const result = extractUrlsFromHtml(response.data);
-    if (result) {
-      console.log("[Scraper] Engine 1 (Embed) fetched data successfully!");
-      return result;
-    }
-  } catch (e) {
-    console.warn("[Scraper] Engine 1 bypassed.");
-  }
-
-  // 🔹 موتور دوم: Gateway موبایل فیسبوک
-  try {
-    const mobileUrl = targetUrl
-      .replace("www.facebook.com", "m.facebook.com")
-      .replace("web.facebook.com", "m.facebook.com");
-    
-    console.log("[Scraper] Running Engine 2 (Mobile Gateway Scan):", mobileUrl);
-    const response = await axios.get(mobileUrl, {
-      headers: { "User-Agent": USER_AGENTS[1], "Cache-Control": "no-cache" },
-      timeout: 10000
-    });
-
-    const result = extractUrlsFromHtml(response.data);
-    if (result) {
-      console.log("[Scraper] Engine 2 (Mobile) fetched data successfully!");
-      return result;
-    }
-  } catch (e) {
-    console.warn("[Scraper] Engine 2 failed.");
-  }
-
-  throw new Error("Facebook security actively rejected the stream request. Please try another video link.");
-}
-
-function processMetadata(facebookUrl: string, scrapeData: NativeScrapeResult): VideoMetadata {
-  const videoId = extractFacebookVideoId(facebookUrl) || "unknown";
-  return {
-    id: videoId,
-    title: facebookUrl.includes("reel") ? "Facebook Reel" : "Facebook Video",
-    thumbnail: scrapeData.thumbnail,
-    duration: 0,
-    qualities: [
-      { quality: "720p", url: scrapeData.hdUrl },
-      { quality: "480p", url: scrapeData.sdUrl },
-      { quality: "360p", url: scrapeData.sdUrl },
-    ],
-    mediaType: facebookUrl.includes("reel") ? "reel" : "video",
-    sourceUrl: facebookUrl,
+  return { 
+    hdUrl: hdUrl || sdUrl, 
+    sdUrl: sdUrl || hdUrl, 
+    thumbnail 
   };
 }
 
+/**
+ * 🚀 اصلی‌ترین تابع اسکرپر
+ */
+async function scrapeFacebookVideo(url: string): Promise<NativeScrapeResult> {
+  const finalUrl = await resolveUrl(url);
+
+  // موتور اول: Embed Portal
+  try {
+    const embedUrl = `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(finalUrl)}`;
+    const res = await axios.get(embedUrl, { headers: { "User-Agent": USER_AGENT }, timeout: 10000 });
+    const data = extractDataFromHtml(res.data);
+    if (data) return data;
+  } catch (e) { console.log("Engine 1 failed"); }
+
+  // موتور دوم: Mobile Gateway
+  try {
+    const mobileUrl = finalUrl.replace("www.facebook.com", "m.facebook.com");
+    const res = await axios.get(mobileUrl, { headers: { "User-Agent": USER_AGENT }, timeout: 10000 });
+    const data = extractDataFromHtml(res.data);
+    if (data) return data;
+  } catch (e) { console.log("Engine 2 failed"); }
+
+  throw new Error("Unable to extract video. Facebook security restricted the request.");
+}
+
+// 3. Router
 export const facebookDownloaderRouter = router({
   extractVideo: publicProcedure
     .input(z.object({ url: z.string().url() }))
-    .mutation(async ({ input }): Promise<APISuccessResponse<VideoMetadata> | APIErrorResponse> => {
+    .mutation(async ({ input }) => {
       try {
-        if (!isValidFacebookUrl(input.url)) {
-          return { success: false, error: "Invalid Facebook URL." };
-        }
         const scrapeResult = await scrapeFacebookVideo(input.url);
-        return { success: true, data: processMetadata(input.url, scrapeResult) };
+        const videoId = extractFacebookVideoId(input.url) || "unknown";
+        
+        return {
+          success: true,
+          data: {
+            id: videoId,
+            title: "Facebook Video",
+            thumbnail: scrapeResult.thumbnail,
+            duration: 0,
+            qualities: [
+              { quality: "720p", url: scrapeResult.hdUrl },
+              { quality: "480p", url: scrapeResult.sdUrl },
+              { quality: "360p", url: scrapeResult.sdUrl },
+            ],
+            mediaType: "video",
+            sourceUrl: input.url
+          }
+        };
       } catch (error) {
-        return { success: false, error: extractErrorMessage(error) };
+        return { success: false, error: "Failed to fetch video. Please try again." };
       }
     }),
 
@@ -273,17 +150,15 @@ export const facebookDownloaderRouter = router({
     .mutation(async ({ input }) => {
       try {
         const scrapeResult = await scrapeFacebookVideo(input.url);
-        const selectedUrl = input.quality === "720p" ? scrapeResult.hdUrl : scrapeResult.sdUrl;
-        return { success: true, data: { url: selectedUrl, quality: input.quality, title: "Facebook Media" } };
+        return { 
+          success: true, 
+          data: { 
+            url: input.quality === "720p" ? scrapeResult.hdUrl : scrapeResult.sdUrl, 
+            quality: input.quality 
+          } 
+        };
       } catch (error) {
-        return { success: false, error: extractErrorMessage(error) };
+        return { success: false, error: "Error getting download link." };
       }
-    }),
-
-  validateUrl: publicProcedure
-    .input(z.object({ url: z.string() }))
-    .query(({ input }) => {
-      const isValid = isValidFacebookUrl(input.url);
-      return { isValid, videoId: isValid ? extractFacebookVideoId(input.url) : null };
     }),
 });
