@@ -26,6 +26,7 @@ interface NativeScrapeResult {
 }
 
 // 2. تنظیمات و ابزارهای کمکی
+const DESKTOP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 const MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
 
 function isValidFacebookUrl(url: string): boolean {
@@ -39,68 +40,66 @@ const decodeFBUrl = (rawUrl: string): string => {
 };
 
 /**
- * 🔍 آدرس‌یاب هوشمند ضد‌بلوک (تبدیل لینک‌های کوتاه به آدرس واقعی ویدیو یا ریلز)
+ * 🔍 آدرس‌یاب فوق‌پیشرفته (مجهز به رادار رمزگشایی پارامترهای امنیتی فیسبوک)
  */
 async function resolveUrl(url: string): Promise<string> {
   if (!url.includes("share") && !url.includes("fb.watch")) return url;
   
-  // تبدیل لینک دسکتاپ به نسخه mbasic برای فریب دادن فایروال فیسبوک
-  let targetMbasicUrl = url
-    .replace("www.facebook.com", "mbasic.facebook.com")
-    .replace("m.facebook.com", "mbasic.facebook.com");
-
-  console.log("[Resolver] Expanding link via Mobile Basic Gateway:", targetMbasicUrl);
+  console.log("[Resolver] Deep Scanning short link:", url);
   
-  try {
-    const response = await axios.get(targetMbasicUrl, {
-      headers: { 
-        "User-Agent": MOBILE_USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5"
-      },
-      maxRedirects: 5,
-      timeout: 9000,
-      validateStatus: (status) => status >= 200 && status < 400 // جلوگیری از کرش در ریدایرکت‌های خاص
-    });
-
-    // گام اول: بررسی ریدایرکت اتوماتیک لایه شبکه
-    if (response.request?.res?.responseUrl) {
-      const finalUrl = response.request.res.responseUrl;
-      if (finalUrl.includes("/reel/") || finalUrl.includes("/videos/") || finalUrl.includes("v=")) {
-        console.log("[Resolver] Successfully expanded via Network to:", finalUrl);
-        return finalUrl.replace("mbasic.facebook.com", "www.facebook.com");
-      }
-    }
-
-    // گام دوم: اگر ریدایرکت نشد، شکار آدرس از بدنه HTML (تگ طلایی og:url)
-    const html = response.data;
-    if (typeof html === "string") {
-      const ogUrlMatch = html.match(/property="og:url"\s+content="([^"]+)"/) || html.match(/"target_url":"([^"]+)"/);
-      if (ogUrlMatch && ogUrlMatch[1]) {
-        const decoded = decodeFBUrl(ogUrlMatch[1]);
-        console.log("[Resolver] Successfully expanded via Meta HTML to:", decoded);
-        return decoded;
-      }
-    }
-  } catch (e) {
-    console.warn("[Resolver] Mobile Basic failed, executing raw header location hunter...");
+  const userAgents = [DESKTOP_USER_AGENT, MOBILE_USER_AGENT];
+  
+  for (const ua of userAgents) {
     try {
-      // گام آخر: شکارچی خام هدر Location با متد صفر-انتقال
-      const rawRes = await axios.get(url, {
-        headers: { "User-Agent": MOBILE_USER_AGENT },
-        maxRedirects: 0,
-        validateStatus: (status) => status >= 300 && status < 400,
-        timeout: 5000
+      const response = await axios.get(url, {
+        headers: { 
+          "User-Agent": ua,
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5"
+        },
+        maxRedirects: 5,
+        timeout: 7000,
+        validateStatus: (status) => status >= 200 && status < 500
       });
-      if (rawRes.headers.location) {
-        let loc = rawRes.headers.location;
-        if (loc.startsWith("/")) loc = `https://www.facebook.com${loc}`;
-        return loc;
+
+      const finalReachedUrl = response.request?.res?.responseUrl || "";
+      console.log("[Resolver] Target destination reached:", finalReachedUrl);
+
+      // 🔥 تکنیک اول: شکار لینک از پارامتر مخفی ?next= در گیت امنیتی لاگین فیسبوک
+      if (finalReachedUrl.includes("login") && finalReachedUrl.includes("next=")) {
+        const urlObj = new URL(finalReachedUrl);
+        const nextParam = urlObj.searchParams.get("next");
+        if (nextParam) {
+          const decodedNext = decodeURIComponent(nextParam);
+          if (decodedNext.includes("/reel/") || decodedNext.includes("/videos/") || decodedNext.includes("v=")) {
+            console.log("[Resolver] Success! Extracted from Facebook Security Gateway:", decodedNext);
+            return decodedNext;
+          }
+        }
       }
-    } catch (err) {
-      console.error("[Resolver] All expansion strategies exhausted.");
+
+      // تکنیک دوم: اگر ریدایرکت سالم بود و مستقیما به ویدیو رسید
+      if (finalReachedUrl.includes("/reel/") || finalReachedUrl.includes("/videos/") || finalReachedUrl.includes("v=")) {
+        console.log("[Resolver] Success! Resolved directly via network:", finalReachedUrl);
+        return finalReachedUrl;
+      }
+
+      // تکنیک سوم: اسکن کدهای تگ Meta صفحات میانی
+      const html = response.data;
+      if (typeof html === "string") {
+        const ogUrlMatch = html.match(/property="og:url"\s+content="([^"]+)"/) || html.match(/"target_url":"([^"]+)"/);
+        if (ogUrlMatch && ogUrlMatch[1]) {
+          const extractedMeta = decodeFBUrl(ogUrlMatch[1]);
+          console.log("[Resolver] Success! Extracted from Meta OpenGraph:", extractedMeta);
+          return extractedMeta;
+        }
+      }
+    } catch (e) {
+      console.warn("[Resolver] Scan strategy bypass active.");
     }
   }
+
+  console.log("[Resolver] Warning: Fallback to original URL due to aggressive blocking.");
   return url;
 }
 
@@ -172,25 +171,25 @@ function extractDataFromHtml(html: string): NativeScrapeResult | null {
 async function scrapeFacebookVideo(url: string): Promise<NativeScrapeResult> {
   const finalUrl = await resolveUrl(url);
 
-  // موتور اول: پلاگین امبد دسکتاپ (بسیار پایدار برای ویدیوهای پابلیک)
+  // موتور اول: پلاگین امبد دسکتاپ (موتور برنده ویدیوهای پابلیک شما)
   try {
     const embedUrl = `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(finalUrl)}`;
     console.log("[Scraper] Running Engine 1 (Embed):", embedUrl);
-    const res = await axios.get(embedUrl, { headers: { "User-Agent": MOBILE_USER_AGENT }, timeout: 10000 });
+    const res = await axios.get(embedUrl, { headers: { "User-Agent": DESKTOP_USER_AGENT }, timeout: 10000 });
     const data = extractDataFromHtml(res.data);
     if (data) return data;
   } catch (e) { console.log("[Scraper] Engine 1 failed."); }
 
   // موتور دوم: اسکن لایه موبایل گیت‌وی (`m.facebook.com`)
   try {
-    const mobileUrl = finalUrl.replace("www.facebook.com", "m.facebook.com");
+    const mobileUrl = finalUrl.replace("www.facebook.com", "m.facebook.com").replace("mbasic.facebook.com", "m.facebook.com");
     console.log("[Scraper] Running Engine 2 (Mobile Gateway):", mobileUrl);
     const res = await axios.get(mobileUrl, { headers: { "User-Agent": MOBILE_USER_AGENT }, timeout: 10000 });
     const data = extractDataFromHtml(res.data);
     if (data) return data;
   } catch (e) { console.log("[Scraper] Engine 2 failed."); }
 
-  throw new Error("Unable to extract video streams. Facebook security rejected the query.");
+  throw new Error("Unable to extract video streams. Facebook security restricted the query.");
 }
 
 // 3. سرویس‌های اصلی روتر tRPC پروژه شما
