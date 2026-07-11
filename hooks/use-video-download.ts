@@ -1,6 +1,7 @@
 /**
  * useVideoDownload Hook
  * Real video download implementation with Dynamic Debugger
+ * Optimized for Free Native Backend Scraper
  */
 
 import { useState, useCallback } from "react";
@@ -33,7 +34,12 @@ const findVideoUrlDeep = (obj: any): string | null => {
   if (!obj) return null;
   if (typeof obj === "string") {
     const isUrl = obj.startsWith("http://") || obj.startsWith("https://");
-    const isVideo = obj.includes(".mp4") || obj.includes("fbcdn.net") || obj.includes("video") || obj.includes("media");
+    
+    // 🌟 اصلاح طلایی: جلوگیری از اشتباه گرفتن لینک اصلی فیسبوک با لینک دانلود ویدیو
+    const isVideo = (obj.includes(".mp4") || obj.includes("fbcdn.net") || obj.includes("video") || obj.includes("media")) 
+                    && !obj.includes("facebook.com") 
+                    && !obj.includes("fb.watch");
+                    
     const isThumbnail = obj.includes(".jpg") || obj.includes(".jpeg") || obj.includes(".png") || obj.includes("thumbnail");
     if (isUrl && isVideo && !isThumbnail) return obj;
   }
@@ -135,7 +141,7 @@ export function useVideoDownload() {
       try {
         setState((prev) => ({ ...prev, loading: true, error: null }));
 
-        if (!url || !url.includes("facebook.com")) {
+        if (!url || (!url.includes("facebook.com") && !url.includes("fb.watch") && !url.includes("fb.com"))) {
           throw new Error("Invalid Facebook URL");
         }
 
@@ -149,13 +155,11 @@ export function useVideoDownload() {
 
         const extractedDownloadUrl = findVideoUrlDeep(res);
 
-        // 🛠 دباگر هوشمند: نمایش مستقیم پاسخ سرور در صورت نبودن لینک دانلود
         if (!extractedDownloadUrl) {
           const backendError = res?.error || res?.message || res?.data?.error || res?.data?.message;
           if (backendError) {
             throw new Error(`Backend Msg: ${backendError}`);
           }
-          // اگر اروری نبود، کل آبجکت دریافتی را متنی کن تا ببینیم چیست
           throw new Error("Server Sent: " + JSON.stringify(res).substring(0, 100));
         }
 
@@ -202,7 +206,7 @@ export function useVideoDownload() {
 
         let downloadUrl = videoUrl;
 
-        if (videoUrl.includes("facebook.com") || videoUrl.includes("fb.watch")) {
+        if (videoUrl.includes("facebook.com") || videoUrl.includes("fb.watch") || videoUrl.includes("fb.com")) {
           const downloadResponse = await facebookDownloaderMutation.mutateAsync({ url: videoUrl });
           const dlRes = downloadResponse as any;
           const extractedUrl = findVideoUrlDeep(dlRes);
