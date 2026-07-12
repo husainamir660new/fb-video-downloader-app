@@ -27,7 +27,7 @@ const schemeFromBundleId = `manus${timestamp}`;
 // ---------------------------------------------------------------------------
 const env = {
   appName: "Fast Video Downloader",
-  appSlug: "fb-video-downloader",
+  appSlug: "fb_video_downloader",
   logoUrl:
     "https://d2xsxph8kpxj0f.cloudfront.net/310519663536195383/FgNVMB3VxiUe2gdY2a9c7N/icon-azsQsYx7dAZdEb6DbyQND9.webp",
   scheme: schemeFromBundleId,
@@ -50,7 +50,7 @@ const config: ExpoConfig = {
   version: "1.0.0",
   extra: {
     eas: {
-      projectId: "a4963734-26d7-440f-80fe-d71cacde633f",
+      projectId: "e07aa9ad-8898-4d93-b9ca-884ad7f4ab82",
     },
     // Google Play Store metadata
     privacyPolicyUrl: env.privacyPolicyUrl,
