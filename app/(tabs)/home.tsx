@@ -11,6 +11,7 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as Clipboard from "expo-clipboard";
@@ -19,6 +20,8 @@ import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useDownload } from "@/lib/download-context";
 import { cn } from "@/lib/utils";
+// اضافه شده برای فعال‌سازی تبلیغات
+import { BannerAdComponent } from "@/components/ads/banner-ad";
 
 function isValidFacebookUrl(url: string): boolean {
   try {
@@ -198,6 +201,12 @@ export default function HomeScreen() {
               </Text>
             </View>
           </TouchableOpacity>
+
+          {/* تبلیغات فعال شده‌اند - در بیلد نهایی APK نمایش داده می‌شوند */}
+          <View className="mt-auto items-center pt-8">
+            <BannerAdComponent />
+          </View>
+
         </View>
       </ScrollView>
     </ScreenContainer>
