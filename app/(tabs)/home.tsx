@@ -11,7 +11,6 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as Clipboard from "expo-clipboard";
@@ -21,17 +20,6 @@ import { useColors } from "@/hooks/use-colors";
 import { useDownload } from "@/lib/download-context";
 import { cn } from "@/lib/utils";
 
-// بارگذاری داینامیک کامپوننت تبلیغات AdMob
-let BannerAdComponent: any = null;
-if (Platform.OS === "android" || Platform.OS === "ios") {
-  try {
-    BannerAdComponent = require("@/components/ads/banner-ad").BannerAdComponent;
-  } catch (error) {
-    console.warn("⚠️ Failed to load BannerAdComponent:", error);
-  }
-}
-
-// سیستم اعتبارسنجی هوشمند لینک‌های فیسبوک (حتی بدون https)
 function isValidFacebookUrl(url: string): boolean {
   try {
     let formattedUrl = url.trim();
@@ -46,7 +34,7 @@ function isValidFacebookUrl(url: string): boolean {
 }
 
 /**
- * تابع حل‌کننده لینک‌های کوتاه با اینترنت محلی دستگاه کاربر
+ * ⚡️ تابع حل‌کننده پیشرفته لینک با قابلیت استخراج لینک اصلی از دیوار لاگین
  */
 const resolveFacebookUrlClientSide = async (inputUrl: string): Promise<string> => {
   let trimmed = inputUrl.trim();
@@ -66,6 +54,17 @@ const resolveFacebookUrlClientSide = async (inputUrl: string): Promise<string> =
     });
 
     if (response.url) {
+      // 🎯 شکار بزرگ: اگر به صفحه لاگین هدایت شدیم، لینک اصلی ویدیو را از پارامتر next برمی‌داریم
+      if (response.url.includes("/login") || response.url.includes("checkpoint")) {
+        const urlObj = new URL(response.url);
+        const nextParam = urlObj.searchParams.get("next");
+        if (nextParam) {
+          const decodedUrl = decodeURIComponent(nextParam);
+          console.log("[Client Resolver] Extracted real URL from login wall:", decodedUrl);
+          return decodedUrl;
+        }
+      }
+      
       console.log("[Client Resolver] Successfully expanded to:", response.url);
       return response.url;
     }
@@ -85,7 +84,6 @@ export default function HomeScreen() {
   const [hasClipboard, setHasClipboard] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
 
-  // بررسی حافظه موقت در هنگام لود شدن صفحه
   useEffect(() => {
     checkClipboard();
   }, []);
@@ -128,7 +126,6 @@ export default function HomeScreen() {
       setError("");
       setIsResolving(true);
 
-      // استخراج لینک مستقیم و بدون ریدایرکت از ساختار فیسبوک
       const finalUrl = await resolveFacebookUrlClientSide(url);
 
       setVideoMetadata({
@@ -152,60 +149,30 @@ export default function HomeScreen() {
     <ScreenContainer className="p-6">
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
         <View className="flex-1 gap-8">
-          {/* Header */}
           <View className="items-center gap-2">
-            <Text className="text-4xl font-bold text-foreground">
-              FB Video Downloader
-            </Text>
-            <Text className="text-base text-muted text-center">
-              Download Facebook videos in HD quality
-            </Text>
+            <Text className="text-4xl font-bold text-foreground">FB Video Downloader</Text>
+            <Text className="text-base text-muted text-center">Download Facebook videos in HD quality</Text>
           </View>
 
-          {/* URL Input Section */}
           <View className="gap-4">
-            <Text className="text-lg font-semibold text-foreground">
-              Video URL
-            </Text>
-
-            {/* URL Input Field */}
-            <View
-              className={cn(
-                "flex-row items-center gap-3 rounded-lg border px-4 py-3",
-                error ? "border-error bg-error/10" : "border-border bg-surface"
-              )}
-            >
-              <MaterialIcons
-                name="link"
-                size={20}
-                color={error ? colors.error : colors.foreground}
-              />
+            <Text className="text-lg font-semibold text-foreground">Video URL</Text>
+            <View className={cn("flex-row items-center gap-3 rounded-lg border px-4 py-3", error ? "border-error bg-error/10" : "border-border bg-surface")}>
+              <MaterialIcons name="link" size={20} color={error ? colors.error : colors.foreground} />
               <TextInput
                 className="flex-1 text-foreground"
                 placeholder="https://www.facebook.com/share/v/..."
                 placeholderTextColor={colors.muted}
                 value={url}
-                onChangeText={(text) => {
-                  setUrl(text);
-                  if (error) setError("");
-                }}
+                onChangeText={(text) => { setUrl(text); if (error) setError(""); }}
                 editable={!isResolving}
               />
               {hasClipboard && !url && (
-                <TouchableOpacity
-                  onPress={handlePasteFromClipboard}
-                  className="px-3 py-2"
-                >
-                  <MaterialIcons
-                    name="content-paste"
-                    size={20}
-                    color={colors.primary}
-                  />
+                <TouchableOpacity onPress={handlePasteFromClipboard} className="px-3 py-2">
+                  <MaterialIcons name="content-paste" size={20} color={colors.primary} />
                 </TouchableOpacity>
               )}
             </View>
 
-            {/* Error Message */}
             {error && (
               <View className="flex-row items-center gap-2 rounded-lg bg-error/10 px-4 py-3">
                 <MaterialIcons name="error" size={18} color={colors.error} />
@@ -214,7 +181,6 @@ export default function HomeScreen() {
             )}
           </View>
 
-          {/* Extract Button */}
           <TouchableOpacity
             onPress={handleExtractInfo}
             disabled={isResolving}
@@ -232,58 +198,6 @@ export default function HomeScreen() {
               </Text>
             </View>
           </TouchableOpacity>
-
-          {/* Info Card */}
-          <View className="gap-3 rounded-lg border border-border bg-surface p-4">
-            <View className="flex-row items-center gap-2">
-              <MaterialIcons name="info" size={20} color={colors.primary} />
-              <Text className="text-base font-semibold text-foreground">
-                How to use
-              </Text>
-            </View>
-            <View className="gap-2">
-              <Text className="text-sm text-muted leading-relaxed">
-                1. Copy a Facebook video URL
-              </Text>
-              <Text className="text-sm text-muted leading-relaxed">
-                2. Paste it above or use the clipboard button
-              </Text>
-              <Text className="text-sm text-muted leading-relaxed">
-                3. Select your preferred quality
-              </Text>
-              <Text className="text-sm text-muted leading-relaxed">
-                4. Download to your device
-              </Text>
-            </View>
-          </View>
-
-          {/* Supported Formats */}
-          <View className="gap-3 rounded-lg border border-border bg-surface p-4">
-            <View className="flex-row items-center gap-2">
-              <MaterialIcons name="video-library" size={20} color={colors.primary} />
-              <Text className="text-base font-semibold text-foreground">
-                Supported Formats
-              </Text>
-            </View>
-            <View className="gap-1">
-              <Text className="text-sm text-muted">
-                • MP4 (H.264 video codec)
-              </Text>
-              <Text className="text-sm text-muted">
-                • AAC audio codec
-              </Text>
-              <Text className="text-sm text-muted">
-                • Multiple quality options (360p, 480p, 720p)
-              </Text>
-            </View>
-          </View>
-
-          {/* نمایش بنر تبلیغاتی AdMob بر اساس پلتفرم */}
-          {BannerAdComponent && Platform.OS !== "web" && (
-            <View className="mt-4">
-              <BannerAdComponent />
-            </View>
-          )}
         </View>
       </ScrollView>
     </ScreenContainer>
