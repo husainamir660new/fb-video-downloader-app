@@ -10,7 +10,7 @@ import {
   View,
   TextInput,
   TouchableOpacity,
-  Alert,
+  ActivityIndicator,
   Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -21,7 +21,7 @@ import { useColors } from "@/hooks/use-colors";
 import { useDownload } from "@/lib/download-context";
 import { cn } from "@/lib/utils";
 
-// خطوط 24-32: Dynamic import with Platform check
+// بارگذاری داینامیک کامپوننت تبلیغات AdMob
 let BannerAdComponent: any = null;
 if (Platform.OS === "android" || Platform.OS === "ios") {
   try {
@@ -31,15 +31,49 @@ if (Platform.OS === "android" || Platform.OS === "ios") {
   }
 }
 
-// Simple URL validation
+// سیستم اعتبارسنجی هوشمند لینک‌های فیسبوک (حتی بدون https)
 function isValidFacebookUrl(url: string): boolean {
   try {
-    const urlObj = new URL(url);
-    return urlObj.hostname.includes("facebook.com");
+    let formattedUrl = url.trim();
+    if (!/^https?:\/\//i.test(formattedUrl)) {
+      formattedUrl = "https://" + formattedUrl;
+    }
+    const urlObj = new URL(formattedUrl);
+    return /facebook\.com|fb\.watch|fb\.com/.test(urlObj.hostname);
   } catch {
     return false;
   }
 }
+
+/**
+ * تابع حل‌کننده لینک‌های کوتاه با اینترنت محلی دستگاه کاربر
+ */
+const resolveFacebookUrlClientSide = async (inputUrl: string): Promise<string> => {
+  let trimmed = inputUrl.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    trimmed = "https://" + trimmed;
+  }
+
+  if (!trimmed.includes("share") && !trimmed.includes("fb.watch") && !trimmed.includes("fb.com")) {
+    return trimmed;
+  }
+
+  console.log("[Client Resolver] Expanding short link using mobile IP...");
+  try {
+    const response = await fetch(trimmed, {
+      method: "GET",
+      redirect: "follow",
+    });
+
+    if (response.url) {
+      console.log("[Client Resolver] Successfully expanded to:", response.url);
+      return response.url;
+    }
+  } catch (error) {
+    console.warn("[Client Resolver] Device redirect failed, bypassing to original.");
+  }
+  return trimmed;
+};
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -49,8 +83,9 @@ export default function HomeScreen() {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   const [hasClipboard, setHasClipboard] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
 
-  // Check clipboard on mount
+  // بررسی حافظه موقت در هنگام لود شدن صفحه
   useEffect(() => {
     checkClipboard();
   }, []);
@@ -91,16 +126,23 @@ export default function HomeScreen() {
 
     try {
       setError("");
-      // Set minimal metadata - full metadata will be extracted on downloading screen
+      setIsResolving(true);
+
+      // استخراج لینک مستقیم و بدون ریدایرکت از ساختار فیسبوک
+      const finalUrl = await resolveFacebookUrlClientSide(url);
+
       setVideoMetadata({
         id: Date.now().toString(),
         title: "Loading...",
         duration: 0,
         thumbnail: "",
-        url: url.trim(),
+        url: finalUrl,
       });
+      
+      setIsResolving(false);
       router.push("/(tabs)/downloading");
     } catch (err) {
+      setIsResolving(false);
       setError("Failed to process URL");
       console.error(err);
     }
@@ -143,11 +185,11 @@ export default function HomeScreen() {
                 placeholder="https://www.facebook.com/share/v/..."
                 placeholderTextColor={colors.muted}
                 value={url}
-                onChangeText={(text ) => {
+                onChangeText={(text) => {
                   setUrl(text);
                   if (error) setError("");
                 }}
-                editable={true}
+                editable={!isResolving}
               />
               {hasClipboard && !url && (
                 <TouchableOpacity
@@ -175,13 +217,18 @@ export default function HomeScreen() {
           {/* Extract Button */}
           <TouchableOpacity
             onPress={handleExtractInfo}
-            className="rounded-lg bg-primary py-4"
+            disabled={isResolving}
+            className={cn("rounded-lg py-4", isResolving ? "bg-primary/60" : "bg-primary")}
             activeOpacity={0.8}
           >
             <View className="flex-row items-center justify-center gap-2">
-              <MaterialIcons name="search" size={20} color={colors.background} />
+              {isResolving ? (
+                <ActivityIndicator size="small" color={colors.background} />
+              ) : (
+                <MaterialIcons name="search" size={20} color={colors.background} />
+              )}
               <Text className="text-lg font-semibold text-background">
-                Extract Video Info
+                {isResolving ? "Analyzing Secure Link..." : "Extract Video Info"}
               </Text>
             </View>
           </TouchableOpacity>
@@ -189,11 +236,7 @@ export default function HomeScreen() {
           {/* Info Card */}
           <View className="gap-3 rounded-lg border border-border bg-surface p-4">
             <View className="flex-row items-center gap-2">
-              <MaterialIcons
-                name="info"
-                size={20}
-                color={colors.primary}
-              />
+              <MaterialIcons name="info" size={20} color={colors.primary} />
               <Text className="text-base font-semibold text-foreground">
                 How to use
               </Text>
@@ -217,11 +260,7 @@ export default function HomeScreen() {
           {/* Supported Formats */}
           <View className="gap-3 rounded-lg border border-border bg-surface p-4">
             <View className="flex-row items-center gap-2">
-              <MaterialIcons
-                name="video-library"
-                size={20}
-                color={colors.primary}
-              />
+              <MaterialIcons name="video-library" size={20} color={colors.primary} />
               <Text className="text-base font-semibold text-foreground">
                 Supported Formats
               </Text>
@@ -239,7 +278,7 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          // خطوط 242-247: Conditional render
+          {/* نمایش بنر تبلیغاتی AdMob بر اساس پلتفرم */}
           {BannerAdComponent && Platform.OS !== "web" && (
             <View className="mt-4">
               <BannerAdComponent />
