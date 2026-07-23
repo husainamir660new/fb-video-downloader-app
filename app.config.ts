@@ -47,7 +47,7 @@ const env = {
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
-  version: "1.0.0",
+  version: "1.0.1",
   extra: {
     eas: {
       projectId: "e07aa9ad-8898-4d93-b9ca-884ad7f4ab82",
@@ -79,7 +79,7 @@ const config: ExpoConfig = {
 
   android: {
     package: env.androidPackage,
-      versionCode: 4,   
+      versionCode: 5,   
     adaptiveIcon: {
       backgroundColor: "#E6F4FE",
       foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -155,8 +155,8 @@ const config: ExpoConfig = {
       "expo-build-properties",
       {
         android: {
-          compileSdkVersion: 35,
-          targetSdkVersion: 35,
+          compileSdkVersion: 36,
+          targetSdkVersion: 36,
           minSdkVersion: 24,
           buildToolsVersion: "35.0.0",
           kotlinVersion: "2.2.20",
